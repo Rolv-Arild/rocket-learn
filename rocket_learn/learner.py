@@ -41,6 +41,9 @@ class learner:
 
         # <-- build workers either here or externally to avoid linkage
         # should we use rolv's sb3 code or can we do better not being tied to sb3?
+        # ROLV COMMENT:
+        # SB3 has a bunch of useful stuff even if their PPO impl is a little strange.
+        # Could make our own PPO by subclassing SB3 stuff, but may place unknown restrictions on us at some stage
 
         #might be better to move this "main work step" to an external class
         while True:
@@ -79,6 +82,9 @@ class PPO:
     def calculate(self):
         for e in range(self.epochs):
             #PPO MATH HERE, DIFFERENT WAYS TO DO THIS, DO WE CARE WHICH IMPLEMENTATION?
+            # ROLV COMMENT:
+            # Is there some overview of different methods (pros/cons)?
+            # If there is something that is closer to our task that should be preferred.
             pass
 
 

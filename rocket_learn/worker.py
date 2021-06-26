@@ -10,6 +10,8 @@ from redis import Redis
 import msgpack
 from rlgym.utils.common_values import BLUE_TEAM, ORANGE_TEAM
 
+from rocket_learn.experience_buffer import ExperienceBuffer
+
 QUALITIES = "qualities"
 MODEL_LATEST = "model-latest"
 MODEL_N = "model-{}"
@@ -67,12 +69,15 @@ def worker(epic_rl_path, current_version_prob=0.8, **match_args):
     env = Gym(match=match, pipe_id=os.getpid(), path_to_rl=epic_rl_path, use_injector=True)
     n_agents = match.agents
 
-
-    #SOREN COMMENT:
+    # SOREN COMMENT:
     # this only lets an agent play 1 episode potentially before being swapped out?
     # is MODEL_LATEST meant to be the policy update? the snippet https://discord.com/channels/@me/854538129670012968/857705662439227402
     # suggested an update was applied, not an
-    #
+    # ROLV COMMENT:
+    # MODEL_LATEST is the current parameters from the latest policy update.
+    # Past agents (saved every couple iterations) are selected randomly based on their quality.
+    # We could cache so we save some communication overhead in case it reuses agents.
+    # I just copied OpenAI which uses past agents 20% of the time, and latest parameters otherwise.
 
     while True:
         current_agent = msgpack.loads(redis.get(MODEL_LATEST))
@@ -97,39 +102,47 @@ def worker(epic_rl_path, current_version_prob=0.8, **match_args):
 
         np.random.shuffle(agents)
 
-        observations = env.reset()
+        observations = env.reset()  # Do we need to add this to buffer?
         done = False
-        rollouts = [[] for agent, version in agents if version == MODEL_LATEST]
+        rollouts = [
+            ExperienceBuffer(meta={"version": version, "version_prob": prob})
+            for (agent, version, prob), player in zip(agents)
+        ]
+
         while not done:
             actions = [agent.get_action(agent.get_action_distribution(obs))
                        for (agent, version), obs in zip(agents, observations)]
             observations, rewards, done, info = env.step(actions)
+            # Team spirit? Subtract opponent rewards? If left up to RewardFunction would make mean reward 0
 
             state = info["state"]
 
-            n = 0
+            # SOREN COMMENT:
+            # this should only happen every DONE step right?
+            # I moved this assuming so, move it back if I'm wrong
+            # ROLV COMMENT:
+            # Yes and no, rollouts need to have the append call in the loop, but result should probably be
+            # outside somehow. I changed it to use ExperienceBuffer instead
+            for rollout, obs, act, rew, player in zip(rollouts, observations, actions, rewards, state.players):
+                if done:
+                    result = info["result"]
+                    rollout.team = player.TEAM_NUM
+                    rollout.result = result  # Remember to invert result depending on team
 
-        # SOREN COMMENT:
-        # this should only happen every DONE step right?
-        # I moved this assuming so, move it back if I'm wrong
-        for i, ((agent, version, prob), player) in enumerate(zip(agents, state.players)):
-            result = info["result"]
-            if player.TEAM_NUM == ORANGE_TEAM:
-                result = -result
+                    # update_opponent_quality(redis, version, prob, result * 0.01)  TODO in learner loop instead?
 
-            update_opponent_quality(redis, version, prob, result * 0.01)
-
-            if version == MODEL_LATEST:
-                rollouts[n].append((observations[i], actions[i], rewards[i], result))
-                n += 1
+                rollout.add_step(obs, act, rew)
 
         redis.rpush(ROLLOUTS, *(msgpack.dumps(rollout) for rollout in rollouts))
 
-
-
-    #SOREN COMMENT:
+    # SOREN COMMENT:
     # these two should probably be in their own class. I've started by making another file and doing a little work
     # there. Take a look so we can decide which way is better
+    # ROLV COMMENT:
+    # I just used functions because it seemed weird to have a class with, in practice, a single method.
+    # If there is a good reason to use classes instead I'm all for it
+
+
 def redis_rollout_generator():
     redis = Redis()
     while True:
