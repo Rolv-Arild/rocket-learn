@@ -66,6 +66,14 @@ def worker(epic_rl_path, current_version_prob=0.8, **match_args):
     match = Match(**match_args)
     env = Gym(match=match, pipe_id=os.getpid(), path_to_rl=epic_rl_path, use_injector=True)
     n_agents = match.agents
+
+
+    #SOREN COMMENT:
+    # this only lets an agent play 1 episode potentially before being swapped out?
+    # is MODEL_LATEST meant to be the policy update? the snippet https://discord.com/channels/@me/854538129670012968/857705662439227402
+    # suggested an update was applied, not an
+    #
+
     while True:
         current_agent = msgpack.loads(redis.get(MODEL_LATEST))
 
@@ -100,19 +108,28 @@ def worker(epic_rl_path, current_version_prob=0.8, **match_args):
             state = info["state"]
 
             n = 0
-            for i, ((agent, version, prob), player) in enumerate(zip(agents, state.players)):
-                result = info["result"]
-                if player.TEAM_NUM == ORANGE_TEAM:
-                    result = -result
 
-                update_opponent_quality(redis, version, prob, result * 0.01)
+        # SOREN COMMENT:
+        # this should only happen every DONE step right?
+        # I moved this assuming so, move it back if I'm wrong
+        for i, ((agent, version, prob), player) in enumerate(zip(agents, state.players)):
+            result = info["result"]
+            if player.TEAM_NUM == ORANGE_TEAM:
+                result = -result
 
-                if version == MODEL_LATEST:
-                    rollouts[n].append((observations[i], actions[i], rewards[i], result))
-                    n += 1
+            update_opponent_quality(redis, version, prob, result * 0.01)
+
+            if version == MODEL_LATEST:
+                rollouts[n].append((observations[i], actions[i], rewards[i], result))
+                n += 1
+
         redis.rpush(ROLLOUTS, *(msgpack.dumps(rollout) for rollout in rollouts))
 
 
+
+    #SOREN COMMENT:
+    # these two should probably be in their own class. I've started by making another file and doing a little work
+    # there. Take a look so we can decide which way is better
 def redis_rollout_generator():
     redis = Redis()
     while True:
