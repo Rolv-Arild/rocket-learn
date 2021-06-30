@@ -12,6 +12,8 @@ from rlgym.utils.common_values import BLUE_TEAM, ORANGE_TEAM
 
 from rocket_learn.experience_buffer import ExperienceBuffer
 
+# SOREN COMMENT:
+# need to move all keys into dedicated file?
 QUALITIES = "qualities"
 MODEL_LATEST = "model-latest"
 MODEL_N = "model-{}"
@@ -69,10 +71,6 @@ def worker(epic_rl_path, current_version_prob=0.8, **match_args):
     env = Gym(match=match, pipe_id=os.getpid(), path_to_rl=epic_rl_path, use_injector=True)
     n_agents = match.agents
 
-    # SOREN COMMENT:
-    # this only lets an agent play 1 episode potentially before being swapped out?
-    # is MODEL_LATEST meant to be the policy update? the snippet https://discord.com/channels/@me/854538129670012968/857705662439227402
-    # suggested an update was applied, not an
     # ROLV COMMENT:
     # MODEL_LATEST is the current parameters from the latest policy update.
     # Past agents (saved every couple iterations) are selected randomly based on their quality.
@@ -110,20 +108,20 @@ def worker(epic_rl_path, current_version_prob=0.8, **match_args):
         ]
 
         while not done:
+
+            # SOREN COMMENT:
+            # PPO needs critic values. I generate them later currently to try and keep this section
+            # alg agnostic but I want to point it out in case we'd like to change it
+
             actions = [agent.get_action(agent.get_action_distribution(obs))
                        for (agent, version), obs in zip(agents, observations)]
             observations, rewards, done, info = env.step(actions)
+            log_probs = agent.get_log_prob(actions)
             # Team spirit? Subtract opponent rewards? If left up to RewardFunction would make mean reward 0
 
             state = info["state"]
 
-            # SOREN COMMENT:
-            # this should only happen every DONE step right?
-            # I moved this assuming so, move it back if I'm wrong
-            # ROLV COMMENT:
-            # Yes and no, rollouts need to have the append call in the loop, but result should probably be
-            # outside somehow. I changed it to use ExperienceBuffer instead
-            for rollout, obs, act, rew, player in zip(rollouts, observations, actions, rewards, state.players):
+            for rollout, obs, act, rew, don, player in zip(rollouts, observations, actions, rewards, done, state.players):
                 if done:
                     result = info["result"]
                     rollout.team = player.TEAM_NUM
@@ -131,37 +129,6 @@ def worker(epic_rl_path, current_version_prob=0.8, **match_args):
 
                     # update_opponent_quality(redis, version, prob, result * 0.01)  TODO in learner loop instead?
 
-                rollout.add_step(obs, act, rew)
+                rollout.add_step(obs, act, rew, done)
 
         redis.rpush(ROLLOUTS, *(msgpack.dumps(rollout) for rollout in rollouts))
-
-    # SOREN COMMENT:
-    # these two should probably be in their own class. I've started by making another file and doing a little work
-    # there. Take a look so we can decide which way is better
-    # ROLV COMMENT:
-    # I just used functions because it seemed weird to have a class with, in practice, a single method.
-    # If there is a good reason to use classes instead I'm all for it
-
-
-def redis_rollout_generator():
-    redis = Redis()
-    while True:
-        item = redis.lpop(ROLLOUTS)
-        if item is not None:
-            rollout = msgpack.loads(item)
-            yield rollout
-        else:
-            time.sleep(10)
-
-
-def learner(rollout_generator, n_rollouts=36, learning_rate=3e-4, gamma=0.9):
-    while True:
-        rollouts = []
-        while len(rollouts) < n_rollouts:
-            try:
-                rollout = next(rollout_generator)
-                rollouts.append(rollout)
-            except StopIteration:
-                return
-
-        # TODO batch, horizon, PPO
