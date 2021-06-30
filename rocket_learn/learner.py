@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import multiprocessing as mp
 
-import rocket_learn.worker
+from rocket_learn.worker import worker
 from rocket_learn.experience_buffer import ExperienceBuffer
 
 
@@ -37,7 +37,23 @@ critic = nn.Sequential(
     nn.Linear(64, 1)
 )
 
-class learner:
+
+def get_match_args():
+    return dict(
+        game_speed=100,
+        random_resets=True,
+        self_play=SELF_PLAY,
+        team_size=1,
+        obs_builder=AdvancedObs(),
+        terminal_conditions=[TimeoutCondition(600), GoalScoredCondition()],  # 500 = 25 seconds in game
+        reward_function=ReforgedReward(logDir=logDir, GOAL_REWARD=GOAL_REWARD,
+                                       GOAL_PUNISHMENT=GOAL_PUNISHMENT, DIST_EXP_FACTOR=DIST_EXP_FACTOR,
+                                       TOUCH_REWARD=TOUCH_REWARD,
+                                       NULL_PENALTY=NULL_PENALTY, DISTANCE_REWARD_COEF=DISTANCE_REWARD_COEF)
+    )
+
+
+class Learner:
     def __init__(self):
         self.logger = SummaryWriter("log_directory")
         self.algorithm = PPO(actor, critic, self.logger)
@@ -48,20 +64,15 @@ class learner:
         self.redis = Redis(host='127.0.0.1', port=6379)
 
 
+        # SOREN COMMENT: need to support multiple match args so different envs can do
+        # different things
+        rl_exe_path = ""
+        self.buildWorkers(rl_exe_path, get_match_args)
 
-        # might be better to move this "main work step" to an external class
-        # <-- build workers either here or externally to avoid linkage
-        # should we use rolv's sb3 code or can we do better not being tied to sb3?
-        # ROLV COMMENT:
-        # SB3 has a bunch of useful stuff even if their PPO impl is a little strange.
-        # Could make our own PPO by subclassing SB3 stuff, but may place unknown restrictions on us at some stage
+        # SOREN COMMENT: what's a good model number scheme and do you account for continuing
+        # training from a saved model?
 
-
-
-        #what's a good model number scheme and do you account for continuing training from a saved model?
-        model_version = 1
-
-        # this is an ugly way of doing it
+        # SOREN COMMENT: this is an ugly way of doing it
         TRAJ_ROUNDS = 10
         traj_count = 0
         while True:
@@ -79,6 +90,37 @@ class learner:
                 worker.update_model(self.redit, <<add state dict dump>>, model_version)
                 model_version += 1
 
+                # SOREN COMMENT: add in launching extra workers after X amount of time
+
+
+    # pulled from rolv's wrapper and SB3
+    def buildWorkers(self,  match_args_func, path_to_epic_rl, n_envs=1, wait_time=60):
+        #def spawn_process():
+        #    match = Match(**match_args_func())
+        #    env = Gym(match, pipe_id=os.getpid(), path_to_rl=path_to_epic_rl, use_injector=True)
+        #    return env
+
+        #env_fns = [spawn_process for _ in range(n_envs)]
+        env_fns = [match_args_func for _ in range(n_envs)]
+
+        forkserver_available = "forkserver" in mp.get_all_start_methods()
+        start_method = "forkserver" if forkserver_available else "spawn"
+        ctx = mp.get_context(start_method)
+
+        remotes, work_remotes = zip(*[ctx.Pipe() for _ in range(n_envs)])
+        for work_remote, remote, env_fn in zip(work_remotes, remotes, env_fns):
+            #args = (work_remote, remote, CloudpickleWrapper(env_fn))
+
+            args = (path_to_epic_rl, 1, match_args_func) # ** test this, probably wrong
+            process = ctx.Process(target=worker, args=args, daemon=True)
+            process.start()
+
+            self.workers.append(process)
+            work_remote.close()
+            time.sleep(wait_time)
+
+
+
     def recieve_worker_data(self):
         while True:
             item = self.redis.lpop(ROLLOUTS)
@@ -88,9 +130,12 @@ class learner:
             else:
                 time.sleep(10)
 
+
+
     def calculate(self):
         #apply PPO now but separate so we can refactor to allow different algorithm types
         self.algorithm.calculate(self.buffer)
+
 
 
 #this should probably be in its own file
