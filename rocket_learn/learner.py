@@ -54,19 +54,18 @@ def get_match_args():
 
 
 class Learner:
-    def __init__(self):
+    def __init__(self, rl_exe_path):
         self.logger = SummaryWriter("log_directory")
         self.algorithm = PPO(actor, critic, self.logger)
 
         self.buffer = ExperienceBuffer()
 
         #**DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
-        self.redis = Redis(host='127.0.0.1', port=6379)
+        self.redis = Redis(host='127.0.0.1', port=6379, db=0)
 
 
         # SOREN COMMENT: need to support multiple match args so different envs can do
         # different things
-        rl_exe_path = ""
         self.buildWorkers(rl_exe_path, get_match_args)
 
         # SOREN COMMENT: what's a good model number scheme and do you account for continuing
@@ -86,8 +85,11 @@ class Learner:
                 traj_count = 0
 
                 # SOREN COMMENT:
-                # how do you want to combine the actor/critic dictionary for transmission?
-                worker.update_model(self.redit, <<add state dict dump>>, model_version)
+                # Add base algorithm that requires implementation of this method
+                # also, figure out best transmission object
+                state_dict = algorithm.policy_dict_list()
+
+                worker.update_model(self.redit, state_dict, model_version)
                 model_version += 1
 
                 # SOREN COMMENT: add in launching extra workers after X amount of time
@@ -95,12 +97,6 @@ class Learner:
 
     # pulled from rolv's wrapper and SB3
     def buildWorkers(self,  match_args_func, path_to_epic_rl, n_envs=1, wait_time=60):
-        #def spawn_process():
-        #    match = Match(**match_args_func())
-        #    env = Gym(match, pipe_id=os.getpid(), path_to_rl=path_to_epic_rl, use_injector=True)
-        #    return env
-
-        #env_fns = [spawn_process for _ in range(n_envs)]
         env_fns = [match_args_func for _ in range(n_envs)]
 
         forkserver_available = "forkserver" in mp.get_all_start_methods()
@@ -109,8 +105,6 @@ class Learner:
 
         remotes, work_remotes = zip(*[ctx.Pipe() for _ in range(n_envs)])
         for work_remote, remote, env_fn in zip(work_remotes, remotes, env_fns):
-            #args = (work_remote, remote, CloudpickleWrapper(env_fn))
-
             args = (path_to_epic_rl, 1, match_args_func) # ** test this, probably wrong
             process = ctx.Process(target=worker, args=args, daemon=True)
             process.start()
@@ -160,6 +154,9 @@ class PPO:
             {'params': self.critic.parameters(), 'lr': lr_critic}
         ])
 
+    def policy_pickle(self):
+        networks = [self.actorget_state_dict(), self.critic.get_state_dict()]
+        return networks
 
     def calculate(self, buffer: ExperienceBuffer):
         values = self.critic(buffer)
@@ -231,3 +228,7 @@ class PPO:
 
                 #self.logger write here to log results
 
+
+
+if __name__ == "__main__":
+    learner = Learner("E:\\EpicGames\\rocketleague\\Binaries\\Win64\\RocketLeague.exe")

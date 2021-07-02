@@ -18,11 +18,15 @@ QUALITIES = "qualities"
 MODEL_LATEST = "model-latest"
 MODEL_N = "model-{}"
 ROLLOUTS = "rollout"
+VERSION_LATEST = "model-version"
 
 
-def update_model(redis, state_dict_dump, version):
-    redis.set(Keys.LATEST_MODEL, state_dict_dump)
-    redis.set(Keys.LATEST_VERSION, version)
+def update_model(redis, state_dict_dump: list, version):
+    redis.delete(Keys.MODEL_LATEST)
+    redis.delete(Keys.VERSION_LATEST)
+
+    redis.set(Keys.MODEL_LATEST, *state_dict_dump)
+    redis.set(Keys.VERSION_LATEST, version)
 
 
 def add_opponent(redis, state_dict_dump):
