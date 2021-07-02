@@ -1,15 +1,11 @@
-import os
 from typing import Generator
 
-import torch.distributions
 from torch.nn import Module
 
 import rlgym
-from rlgym.envs import Match
-from rlgym.gym import Gym
 from rocket_learn.experience_buffer import ExperienceBuffer
-
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
+from rocket_learn.utils.util import generate_episode
 
 
 class SimpleRolloutGenerator(BaseRolloutGenerator):
@@ -18,21 +14,11 @@ class SimpleRolloutGenerator(BaseRolloutGenerator):
         self.net = net
         self.n_agents = self.env._match.agents
 
-    def generate_rollouts(self) -> Generator:
+    def generate_rollouts(self) -> Generator[ExperienceBuffer]:
         while True:
-            observations = self.env.reset()  # Do we need to add this to buffer?
-            done = False
-            rollouts = [
-                ExperienceBuffer()
-                for _ in range(self.n_agents)
-            ]
+            rollouts = generate_episode(self.env, [self.net] * self.n_agents)
 
-            while not done:
-                # TODO require returning either: -torch.distributions.Distribution or -(selected_action,prob) tuple
-                actions = [self.env(obs) for obs in observations]
-                observations, rewards, done, info = self.env.step(actions)
-
-            yield rollouts
+            yield from rollouts
 
     def update_parameters(self, new_params):
         self.net.load_state_dict(new_params)

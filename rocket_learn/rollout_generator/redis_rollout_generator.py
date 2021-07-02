@@ -3,6 +3,7 @@ from typing import Generator
 
 from redis import Redis
 
+from rocket_learn.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
 
 # Hopefully we only need this one file, so this is where it belongs
@@ -18,7 +19,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.n_updates = 0
         self.save_every = save_every
 
-    def generate_rollouts(self) -> Generator:
+    def generate_rollouts(self) -> Generator[ExperienceBuffer]:
         while True:
             rollout = self.redis.lpop(ROLLOUTS)
             if rollout is not None:  # Assuming nil is converted to None by py-redis
