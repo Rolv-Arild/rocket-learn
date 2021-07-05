@@ -13,73 +13,65 @@ from torch.utils.tensorboard import SummaryWriter
 
 import multiprocessing as mp
 
-from rocket_learn.worker import worker
-from rocket_learn.experience_buffer import ExperienceBuffer
+from worker import worker
+from experience_buffer import ExperienceBuffer
+
+from typing import Any
+import cloudpickle
 
 
+class CloudpickleWrapper:
+    """
+    Copied from SB3
 
-#example pytorch stuff, delete later
-actor = nn.Sequential(
-    nn.Linear(state_dim, 64),
-    nn.Tanh(),
-    nn.Linear(64, 64),
-    nn.Tanh(),
-    nn.Linear(64, action_dim),
-    nn.Softmax(dim=-1)
-)
+    Uses cloudpickle to serialize contents (otherwise multiprocessing tries to use pickle)
 
-# critic
-critic = nn.Sequential(
-    nn.Linear(state_dim, 64),
-    nn.Tanh(),
-    nn.Linear(64, 64),
-    nn.Tanh(),
-    nn.Linear(64, 1)
-)
+    :param var: the variable you wish to wrap for pickling with cloudpickle
+    """
 
+    def __init__(self, var: Any):
+        self.var = var
 
-def get_match_args():
-    return dict(
-        game_speed=100,
-        random_resets=True,
-        self_play=SELF_PLAY,
-        team_size=1,
-        obs_builder=AdvancedObs(),
-        terminal_conditions=[TimeoutCondition(600), GoalScoredCondition()],  # 500 = 25 seconds in game
-        reward_function=ReforgedReward(logDir=logDir, GOAL_REWARD=GOAL_REWARD,
-                                       GOAL_PUNISHMENT=GOAL_PUNISHMENT, DIST_EXP_FACTOR=DIST_EXP_FACTOR,
-                                       TOUCH_REWARD=TOUCH_REWARD,
-                                       NULL_PENALTY=NULL_PENALTY, DISTANCE_REWARD_COEF=DISTANCE_REWARD_COEF)
-    )
+    def __getstate__(self) -> Any:
+        return cloudpickle.dumps(self.var)
 
+    def __setstate__(self, var: Any) -> None:
+        self.var = cloudpickle.loads(var)
 
 class Learner:
-    def __init__(self, rl_exe_path):
-        self.logger = SummaryWriter("log_directory")
-        self.algorithm = PPO(actor, critic, self.logger)
+    def __init__(self, rl_exe_path, algorithm, log_dir, match_arg_list, n_envs=1):
+        self.logger = SummaryWriter(log_dir)
+
+        self.algorithm = algorithm
+        self.algorithm.set_logger(self.logger)
 
         self.buffer = ExperienceBuffer()
+        self.workers = []
 
         #**DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.redis = Redis(host='127.0.0.1', port=6379, db=0)
 
+        #assert n_envs == len(match_arg_list()) or len(match_arg_list()) == 1, \
+        #    "number of environments must match number of match arguments or be length 1"
 
         # SOREN COMMENT: need to support multiple match args so different envs can do
         # different things
-        self.buildWorkers(rl_exe_path, get_match_args)
+        self.buildWorkers(rl_exe_path, match_arg_list, n_envs=n_envs)
 
+
+    def learn(self, n_rollouts = 36):
         # SOREN COMMENT: what's a good model number scheme and do you account for continuing
         # training from a saved model?
 
         # SOREN COMMENT: this is an ugly way of doing it
-        TRAJ_ROUNDS = 10
         traj_count = 0
         while True:
-            self.buffer.add_step(self.recieve_worker_data())
+            val = self.recieve_worker_data()
+            self.buffer.add_step(**val)
             traj_count += 1
 
-            if traj_count >= TRAJ_ROUNDS:
-                self.calculate(self.buffer)
+            if traj_count >= n_rollouts:
+                self.__calculate__(self.buffer)
 
                 self.buffer.clear()
                 traj_count = 0
@@ -105,7 +97,8 @@ class Learner:
 
         remotes, work_remotes = zip(*[ctx.Pipe() for _ in range(n_envs)])
         for work_remote, remote, env_fn in zip(work_remotes, remotes, env_fns):
-            args = (path_to_epic_rl, 1, match_args_func) # ** test this, probably wrong
+            #args = (path_to_epic_rl, 1, match_args_func) # ** test this, probably wrong
+            args = ()#(work_remote, remote, CloudpickleWrapper(env_fn))
             process = ctx.Process(target=worker, args=args, daemon=True)
             process.start()
 
@@ -126,7 +119,7 @@ class Learner:
 
 
 
-    def calculate(self):
+    def __calculate__(self):
         #apply PPO now but separate so we can refactor to allow different algorithm types
         self.algorithm.calculate(self.buffer)
 
@@ -134,12 +127,9 @@ class Learner:
 
 #this should probably be in its own file
 class PPO:
-    def __init__(self, actor, critic, logger, n_rollouts = 36, lr_actor = 3e-4, lr_critic = 3e-4, gamma = 0.9, epochs = 1):
+    def __init__(self, actor, critic, lr_actor = 3e-4, lr_critic = 3e-4, gamma = 0.9, epochs = 1):
         self.actor = actor
         self.critic = critic
-        self.optimizer = optimizer
-
-        self.logger = logger
 
         #hyperparameters
         self.epochs = epochs
@@ -154,9 +144,16 @@ class PPO:
             {'params': self.critic.parameters(), 'lr': lr_critic}
         ])
 
+    def set_logger(self, logger):
+        self.logger = logger
+
     def policy_pickle(self):
-        networks = [self.actorget_state_dict(), self.critic.get_state_dict()]
+        networks = [self.actor.get_state_dict(), self.critic.get_state_dict()]
         return networks
+
+    def evaluate_actions(self):
+        ## **TODO**
+        return -1, -1
 
     def calculate(self, buffer: ExperienceBuffer):
         values = self.critic(buffer)
@@ -177,34 +174,23 @@ class PPO:
         #returns is also called references?
 
         for e in range(self.epochs):
-            # ROLV COMMENT:
-            # Is there some overview of different methods [of PPO] (pros/cons)?
-            # If there is something that is closer to our task that should be preferred.
             # SOREN COMMENT:
-            # I don't know enough to strongly favor one so I'm going with SB3 cause we'll have
-            # a reference
+            # I'm going with SB3 PPO implementation cause we'll have a reference
 
             # this is mostly pulled from sb3
             for i, rollout in enumerate(self.buffer.generate_rollouts(self.batch_size)):
                 #this should probably be consolidated into buffer
                 adv = self.advantages[i:i+batch_size]
 
-                # SOREN COMMENT:
-                # need to figure out the right way to do this. agent is a part of worker
-                # and agent has the distribution. Return as a part of rollouts?
-                <<<<CONTINUE HERE, NEED TO GET THESE>>>>
-                log_prob = XXXXX
-                old_log_prob = XXXXX
-                entropy = XXXXXX
-
-                ratio = torch.exp(log_prob - rollout_data.old_log_prob)
+                log_prob, entropy = self.evaluate_actions()
+                ratio = torch.exp(log_prob - rollout.old_log_prob)
 
                 # clipped surrogate loss
                 policy_loss_1 = adv * ratio
                 policy_loss_2 = adv * th.clamp(ratio, 1 - self.clip_range, 1 + self.clip_range)
                 policy_loss = -torch.min(policy_loss_1, policy_loss_2).mean()
 
-                # If we want value clipping, add it here
+                # **If we want value clipping, add it here**
                 value_loss = F.mse_loss(returns, values)
 
                 if entropy is None:
@@ -227,8 +213,3 @@ class PPO:
 
 
                 #self.logger write here to log results
-
-
-
-if __name__ == "__main__":
-    learner = Learner("E:\\EpicGames\\rocketleague\\Binaries\\Win64\\RocketLeague.exe")

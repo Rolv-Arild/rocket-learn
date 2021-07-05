@@ -10,7 +10,8 @@ from redis import Redis
 import msgpack
 from rlgym.utils.common_values import BLUE_TEAM, ORANGE_TEAM
 
-from rocket_learn.experience_buffer import ExperienceBuffer
+from experience_buffer import ExperienceBuffer
+import utils
 
 # SOREN COMMENT:
 # need to move all keys into dedicated file?
@@ -69,9 +70,12 @@ def update_opponent_quality(redis, index, prob, rate):
         ''', 2, QUALITIES, index, delta)
 
 
-def worker(epic_rl_path, current_version_prob=0.8, **match_args):
+def worker(): #epic_rl_path, current_version_prob=0.8, **match_args):
+    epic_rl_path="E:\\EpicGames\\rocketleague\\Binaries\\Win64\\RocketLeague.exe"
+    current_version_prob=.8
+
     redis = Redis()
-    match = Match(**match_args)
+    match = Match()#**match_args)
     env = Gym(match=match, pipe_id=os.getpid(), path_to_rl=epic_rl_path, use_injector=True)
     n_agents = match.agents
 
@@ -88,7 +92,8 @@ def worker(epic_rl_path, current_version_prob=0.8, **match_args):
         agents = [(current_agent, MODEL_LATEST)]  # Use at least one current agent
 
         if n_agents > 1:
-            adjusted_prob = (current_version_prob * n_agents - 1) / (n_agents - 1)  # Ensure final proportion is same
+            # Ensure final proportion is same
+            adjusted_prob = (current_version_prob * n_agents - 1) / (n_agents - 1)
             for i in range(n_agents - 1):
                 is_current = np.random.random() < adjusted_prob
                 if not is_current:
@@ -104,35 +109,6 @@ def worker(epic_rl_path, current_version_prob=0.8, **match_args):
 
         np.random.shuffle(agents)
 
-        observations = env.reset()  # Do we need to add this to buffer?
-        done = False
-        rollouts = [
-            ExperienceBuffer(meta={"version": version, "version_prob": prob})
-            for (agent, version, prob), player in zip(agents)
-        ]
-
-        while not done:
-
-            # SOREN COMMENT:
-            # PPO needs critic values. I generate them later currently to try and keep this section
-            # alg agnostic but I want to point it out in case we'd like to change it
-
-            actions = [agent.get_action(agent.get_action_distribution(obs))
-                       for (agent, version), obs in zip(agents, observations)]
-            observations, rewards, done, info = env.step(actions)
-            log_probs = agent.get_log_prob(actions)
-            # Team spirit? Subtract opponent rewards? If left up to RewardFunction would make mean reward 0
-
-            state = info["state"]
-
-            for rollout, obs, act, rew, don, player in zip(rollouts, observations, actions, rewards, done, state.players):
-                if done:
-                    result = info["result"]
-                    rollout.team = player.TEAM_NUM
-                    rollout.result = result  # Remember to invert result depending on team
-
-                    # update_opponent_quality(redis, version, prob, result * 0.01)  TODO in learner loop instead?
-
-                rollout.add_step(obs, act, rew, done)
+        rollouts = utils.generate_episode(env, agents)
 
         redis.rpush(ROLLOUTS, *(msgpack.dumps(rollout) for rollout in rollouts))
