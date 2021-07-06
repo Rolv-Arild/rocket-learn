@@ -43,6 +43,7 @@ if __name__ == '__main__':
     alg = PPO(actor, critic)
     rl_path = "C:\\EpicGames\\rocketleague\\Binaries\\Win64\\RocketLeague.exe"
     log_dir = "C:\\log_directory\\"
+    repo_dir = "C:\\repo_directory\\"
 
-    learner = Learner(rl_path, alg, log_dir, get_match_args)
+    learner = Learner(rl_path, alg, log_dir, repo_dir, get_match_args)
     learner.learn()

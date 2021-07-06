@@ -1,17 +1,22 @@
 import os
 import pickle
 import time
+import io
 
 import numpy as np
 from rlgym.envs import Match
 from rlgym.gym import Gym
+
+import torch
+import torch.nn as nn
 
 from redis import Redis
 import msgpack
 from rlgym.utils.common_values import BLUE_TEAM, ORANGE_TEAM
 
 from experience_buffer import ExperienceBuffer
-import utils
+from utils import util
+from simple_agents import PPOAgent
 
 # SOREN COMMENT:
 # need to move all keys into dedicated file?
@@ -23,19 +28,50 @@ ROLLOUTS = "rollout"
 VERSION_LATEST = "model-version"
 
 
-def update_model(redis, state_dict_dump: list, version):
-    redis.delete(Keys.MODEL_ACTOR_LATEST)
-    redis.delete(Keys.MODEL_CRITIC_LATEST)
-    redis.delete(Keys.VERSION_LATEST)
+#DELETE THESE AFTER TESTING
+state_dim = 67
+action_dim = 8
 
-    redis.set(Keys.MODEL_ACTOR_LATEST, msgpack.packb(state_dict_dump[0]))
-    redis.set(Keys.MODEL_CRITIC_LATEST, msgpack.packb(state_dict_dump[1]))
-    redis.set(Keys.VERSION_LATEST, version)
+#example pytorch stuff, delete later
+actor = nn.Sequential(
+    nn.Linear(state_dim, 64),
+    nn.Tanh(),
+    nn.Linear(64, 64),
+    nn.Tanh(),
+    nn.Linear(64, action_dim),
+    nn.Softmax(dim=-1)
+)
+
+# critic
+critic = nn.Sequential(
+    nn.Linear(state_dim, 64),
+    nn.Tanh(),
+    nn.Linear(64, 64),
+    nn.Tanh(),
+    nn.Linear(64, 1)
+)
+
+
+def update_model(redis, agent, version):
+    if redis.exists(MODEL_ACTOR_LATEST) > 0:
+        redis.delete(MODEL_ACTOR_LATEST)
+    if redis.exists(MODEL_CRITIC_LATEST) > 0:
+        redis.delete(MODEL_CRITIC_LATEST)
+    if redis.exists(VERSION_LATEST) > 0:
+        redis.delete(VERSION_LATEST)
+
+    actor_bytes = pickle.dumps(agent.actor.state_dict())
+    critic_bytes = pickle.dumps(agent.critic.state_dict())
+
+    redis.set(MODEL_ACTOR_LATEST, actor_bytes)
+    redis.set(MODEL_CRITIC_LATEST, critic_bytes)
+    redis.set(VERSION_LATEST, version)
+    print("done setting")
 
 
 def add_opponent(redis, state_dict_dump):
     # Add to list
-    redis.rpush(Keys.OP_MODELS, state_dict_dump)
+    redis.rpush(OP_MODELS, state_dict_dump)
     # Set quality
     qualities = [float(v) for v in redis.lrange(QUALITIES, 0, -1)]
     if qualities:
@@ -73,9 +109,11 @@ def update_opponent_quality(redis, index, prob, rate):
         ''', 2, QUALITIES, index, delta)
 
 
-def Worker(epic_rl_path): #epic_rl_path, current_version_prob=0.8, **match_args):
-    #epic_rl_path="E:\\EpicGames\\rocketleague\\Binaries\\Win64\\RocketLeague.exe"
+def Worker(): #epic_rl_path, current_version_prob=0.8, **match_args):
+    epic_rl_path="E:\\EpicGames\\rocketleague\\Binaries\\Win64\\RocketLeague.exe"
     current_version_prob=.8
+
+    current_agent = PPOAgent(actor, critic)
 
     redis = Redis()
     match = Match()#**match_args)
@@ -89,10 +127,14 @@ def Worker(epic_rl_path): #epic_rl_path, current_version_prob=0.8, **match_args)
     # I just copied OpenAI which uses past agents 20% of the time, and latest parameters otherwise.
 
     while True:
-        current_agent = msgpack.loads(redis.get(MODEL_LATEST))
+        actor_dict = pickle.loads(redis.get(MODEL_ACTOR_LATEST))
+        current_agent.actor.load_state_dict(actor_dict)
+
+        critic_dict = pickle.loads(redis.get(MODEL_CRITIC_LATEST))
+        current_agent.critic.load_state_dict(critic_dict)
 
         # TODO customizable past agent selection, should team only be same agent?
-        agents = [(current_agent, MODEL_LATEST)]  # Use at least one current agent
+        agents = [(current_agent, MODEL_ACTOR_LATEST)]  # Use at least one current agent
 
         if n_agents > 1:
             # Ensure final proportion is same
@@ -105,13 +147,13 @@ def Worker(epic_rl_path): #epic_rl_path, current_version_prob=0.8, **match_args)
                     selected_agent = msgpack.loads(redis.get(version))
                 else:
                     prob = current_version_prob
-                    version = MODEL_LATEST
+                    version = VERSION_LATEST
                     selected_agent = current_agent
 
                 agents.append((selected_agent, version, prob))
 
         np.random.shuffle(agents)
 
-        rollouts = utils.generate_episode(env, agents)
+        rollouts = util.generate_episode(env, agents)
 
         redis.rpush(ROLLOUTS, *(msgpack.dumps(rollout) for rollout in rollouts))

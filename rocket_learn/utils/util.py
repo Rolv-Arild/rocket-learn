@@ -1,7 +1,7 @@
 from typing import List
 
 from rlgym.gym import Gym
-from rocket_learn.experience_buffer import ExperienceBuffer
+from experience_buffer import ExperienceBuffer
 
 
 def generate_episode(env: Gym, agents: list) -> List[ExperienceBuffer]:

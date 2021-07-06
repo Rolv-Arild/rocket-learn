@@ -14,8 +14,10 @@ import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
+import worker
 from worker import Worker
 from experience_buffer import ExperienceBuffer
+from simple_agents import PPOAgent
 
 
 
@@ -51,15 +53,17 @@ class Learner:
         #**DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.redis = Redis(host='127.0.0.1', port=6379, db=0)
 
+        print("setting update")
+        #set initial model values
+        worker.update_model(self.redis, self.algorithm.agent, 0)
+        print("update set")
+
         #assert n_envs == len(match_arg_list()) or len(match_arg_list()) == 1, \
         #    "number of environments must match number of match arguments or be length 1"
 
         # SOREN COMMENT: need to support multiple match args so different envs can do
         # different things
         self.buildWorkers(rl_exe_path, match_arg_list, n_envs=n_envs)
-
-        #set initial model values
-        worker.update_model(self.redit, self.algorithm.policy_dict_list(), model_version)
 
 
     # pulled from rolv's wrapper and SB3
@@ -92,7 +96,11 @@ class Learner:
         traj_count = 0
         while True:
             data = self.recieve_worker_data()
-            self.buffer.add_step(**data)
+            print("data:")
+            print(data)
+            for d in data:
+                print(d)
+                self.buffer.add_step(data)
             traj_count += 1
 
             if traj_count >= n_rollouts:
@@ -100,11 +108,11 @@ class Learner:
 
                 #save model
                 model_file = open("model_v"+str(model_version), "w")
-                model_file.write(msgpack.dumps(<<agent?>>))
+                model_file.write(msgpack.dumps(self.algorithm.agent))
                 model_file.close()
 
                 #transmit model updates to workers
-                worker.update_model(self.redit, algorithm.policy_dict_list(), model_version)
+                worker.update_model(self.redit, self.algorithm.agent, model_version)
 
                 self.buffer.clear()
                 model_version += 1
@@ -115,7 +123,8 @@ class Learner:
 
     def recieve_worker_data(self):
         while True:
-            item = self.redis.lpop(ROLLOUTS)
+            # **MOVE ALL KEYS TO SEPARATE FILE**
+            item = self.redis.lpop(worker.ROLLOUTS)
             if item is not None:
                 rollout = msgpack.loads(item)
                 yield rollout

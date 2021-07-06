@@ -2,8 +2,7 @@ import numpy as np
 import torch as th
 from torch.distributions import Categorical
 
-from .agent import BaseAgent
-
+from agent import BaseAgent
 
 class RandomAgent(BaseAgent):
     """Does softmax using biases alone"""
@@ -49,9 +48,12 @@ class PPOAgent(BaseAgent):
         pass
 
     def serialize(self):
+        # **TODO **
+        nets = [self.actor, self.critic]
         return pickle(self)
 
-    def unserialize(self, pickle_data)
+    def unserialize(self, pickle_data):
+        # **TODO **
         return
 
 class NoOpAgent(BaseAgent):
