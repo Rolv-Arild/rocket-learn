@@ -32,6 +32,28 @@ class RandomAgent(BaseAgent):
         ).sum(dim=1)
 
 
+# ** This should be in its own file or packaged with PPO **
+class PPOAgent(BaseAgent):
+    def __init__(self, actor, critic):
+        super().__init__()
+        self.actor = actor
+        self.critic = critic
+
+    def get_actions(self, observation, deterministic=False):
+        return self.actor(observation)
+
+    def get_log_prob(self, actions):
+        return 0
+
+    def set_model_params(self, params):
+        pass
+
+    def serialize(self):
+        return pickle(self)
+
+    def unserialize(self, pickle_data)
+        return
+
 class NoOpAgent(BaseAgent):
     def get_actions(self, observation, deterministic=False):
         return th.zeros((8,))

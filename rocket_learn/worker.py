@@ -16,17 +16,20 @@ import utils
 # SOREN COMMENT:
 # need to move all keys into dedicated file?
 QUALITIES = "qualities"
-MODEL_LATEST = "model-latest"
+MODEL_ACTOR_LATEST = "model-actor-latest"
+MODEL_CRITIC_LATEST = "model-critic-latest"
 MODEL_N = "model-{}"
 ROLLOUTS = "rollout"
 VERSION_LATEST = "model-version"
 
 
 def update_model(redis, state_dict_dump: list, version):
-    redis.delete(Keys.MODEL_LATEST)
+    redis.delete(Keys.MODEL_ACTOR_LATEST)
+    redis.delete(Keys.MODEL_CRITIC_LATEST)
     redis.delete(Keys.VERSION_LATEST)
 
-    redis.set(Keys.MODEL_LATEST, *state_dict_dump)
+    redis.set(Keys.MODEL_ACTOR_LATEST, msgpack.packb(state_dict_dump[0]))
+    redis.set(Keys.MODEL_CRITIC_LATEST, msgpack.packb(state_dict_dump[1]))
     redis.set(Keys.VERSION_LATEST, version)
 
 
@@ -70,8 +73,8 @@ def update_opponent_quality(redis, index, prob, rate):
         ''', 2, QUALITIES, index, delta)
 
 
-def worker(): #epic_rl_path, current_version_prob=0.8, **match_args):
-    epic_rl_path="E:\\EpicGames\\rocketleague\\Binaries\\Win64\\RocketLeague.exe"
+def Worker(epic_rl_path): #epic_rl_path, current_version_prob=0.8, **match_args):
+    #epic_rl_path="E:\\EpicGames\\rocketleague\\Binaries\\Win64\\RocketLeague.exe"
     current_version_prob=.8
 
     redis = Redis()

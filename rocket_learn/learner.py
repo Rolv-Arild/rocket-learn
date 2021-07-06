@@ -1,6 +1,9 @@
 import os
 import pickle
 import time
+from typing import Any
+import cloudpickle
+import multiprocessing as mp
 
 import numpy as np
 
@@ -11,18 +14,15 @@ import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
-import multiprocessing as mp
-
-from worker import worker
+from worker import Worker
 from experience_buffer import ExperienceBuffer
 
-from typing import Any
-import cloudpickle
+
 
 
 class CloudpickleWrapper:
     """
-    Copied from SB3
+    ** Copied from SB3 **
 
     Uses cloudpickle to serialize contents (otherwise multiprocessing tries to use pickle)
 
@@ -39,7 +39,7 @@ class CloudpickleWrapper:
         self.var = cloudpickle.loads(var)
 
 class Learner:
-    def __init__(self, rl_exe_path, algorithm, log_dir, match_arg_list, n_envs=1):
+    def __init__(self, rl_exe_path, algorithm, log_dir, repo_dir, match_arg_list, n_envs=1):
         self.logger = SummaryWriter(log_dir)
 
         self.algorithm = algorithm
@@ -58,33 +58,8 @@ class Learner:
         # different things
         self.buildWorkers(rl_exe_path, match_arg_list, n_envs=n_envs)
 
-
-    def learn(self, n_rollouts = 36):
-        # SOREN COMMENT: what's a good model number scheme and do you account for continuing
-        # training from a saved model?
-
-        # SOREN COMMENT: this is an ugly way of doing it
-        traj_count = 0
-        while True:
-            val = self.recieve_worker_data()
-            self.buffer.add_step(**val)
-            traj_count += 1
-
-            if traj_count >= n_rollouts:
-                self.__calculate__(self.buffer)
-
-                self.buffer.clear()
-                traj_count = 0
-
-                # SOREN COMMENT:
-                # Add base algorithm that requires implementation of this method
-                # also, figure out best transmission object
-                state_dict = algorithm.policy_dict_list()
-
-                worker.update_model(self.redit, state_dict, model_version)
-                model_version += 1
-
-                # SOREN COMMENT: add in launching extra workers after X amount of time
+        #set initial model values
+        worker.update_model(self.redit, self.algorithm.policy_dict_list(), model_version)
 
 
     # pulled from rolv's wrapper and SB3
@@ -98,14 +73,44 @@ class Learner:
         remotes, work_remotes = zip(*[ctx.Pipe() for _ in range(n_envs)])
         for work_remote, remote, env_fn in zip(work_remotes, remotes, env_fns):
             #args = (path_to_epic_rl, 1, match_args_func) # ** test this, probably wrong
-            args = ()#(work_remote, remote, CloudpickleWrapper(env_fn))
-            process = ctx.Process(target=worker, args=args, daemon=True)
+            args = () #(work_remote, remote, CloudpickleWrapper(env_fn))
+            process = ctx.Process(target=Worker, args=args, daemon=True)
             process.start()
 
             self.workers.append(process)
             work_remote.close()
             time.sleep(wait_time)
 
+
+    def learn(self, n_rollouts = 36):
+        # SOREN COMMENT: what's a good model number scheme and do you account for continuing
+        # training from a saved model?
+
+        model_version = 0
+
+        # SOREN COMMENT: this is an ugly way of doing it
+        traj_count = 0
+        while True:
+            data = self.recieve_worker_data()
+            self.buffer.add_step(**data)
+            traj_count += 1
+
+            if traj_count >= n_rollouts:
+                self.__calculate__(self.buffer)
+
+                #save model
+                model_file = open("model_v"+str(model_version), "w")
+                model_file.write(msgpack.dumps(<<agent?>>))
+                model_file.close()
+
+                #transmit model updates to workers
+                worker.update_model(self.redit, algorithm.policy_dict_list(), model_version)
+
+                self.buffer.clear()
+                model_version += 1
+                traj_count = 0
+
+                # SOREN COMMENT: add in launching extra workers after X amount of time
 
 
     def recieve_worker_data(self):
@@ -128,6 +133,8 @@ class Learner:
 #this should probably be in its own file
 class PPO:
     def __init__(self, actor, critic, lr_actor = 3e-4, lr_critic = 3e-4, gamma = 0.9, epochs = 1):
+
+        self.agent = PPOAgent(actor, critic)
         self.actor = actor
         self.critic = critic
 
@@ -140,15 +147,15 @@ class PPO:
         self.ent_coef = 1
         self.vf_coef = 1
         self.optimizer = torch.optim.Adam([
-            {'params': self.actor.parameters(), 'lr': lr_actor},
-            {'params': self.critic.parameters(), 'lr': lr_critic}
+            {'params': self.agent.actor.parameters(), 'lr': lr_actor},
+            {'params': self.agent.critic.parameters(), 'lr': lr_critic}
         ])
 
     def set_logger(self, logger):
         self.logger = logger
 
-    def policy_pickle(self):
-        networks = [self.actor.get_state_dict(), self.critic.get_state_dict()]
+    def policy_dict_list(self):
+        networks = [self.agent.actor.get_state_dict(), self.agent.critic.get_state_dict()]
         return networks
 
     def evaluate_actions(self):
@@ -156,7 +163,7 @@ class PPO:
         return -1, -1
 
     def calculate(self, buffer: ExperienceBuffer):
-        values = self.critic(buffer)
+        values = self.agent.critic(buffer)
         buffer_size = buffer.size()
 
         #totally stole this section from
@@ -179,7 +186,6 @@ class PPO:
 
             # this is mostly pulled from sb3
             for i, rollout in enumerate(self.buffer.generate_rollouts(self.batch_size)):
-                #this should probably be consolidated into buffer
                 adv = self.advantages[i:i+batch_size]
 
                 log_prob, entropy = self.evaluate_actions()
