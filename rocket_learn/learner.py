@@ -1,25 +1,15 @@
-import os
-import pickle
-import time
-from typing import Any
+from typing import Any, List
+
 import cloudpickle
-import multiprocessing as mp
-
 import numpy as np
-
-from redis import Redis
-import msgpack
-
 import torch
+import torch as th
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
-import worker
-from worker import Worker
 from experience_buffer import ExperienceBuffer
+from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
 from simple_agents import PPOAgent
-
-
 
 
 class CloudpickleWrapper:
@@ -40,116 +30,18 @@ class CloudpickleWrapper:
     def __setstate__(self, var: Any) -> None:
         self.var = cloudpickle.loads(var)
 
-class Learner:
-    def __init__(self, rl_exe_path, algorithm, log_dir, repo_dir, match_arg_list, n_envs=1):
-        self.logger = SummaryWriter(log_dir)
 
-        self.algorithm = algorithm
-        self.algorithm.set_logger(self.logger)
-
-        self.buffer = ExperienceBuffer()
-        self.workers = []
-
-        #**DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
-        self.redis = Redis(host='127.0.0.1', port=6379, db=0)
-
-        print("setting update")
-        #set initial model values
-        worker.update_model(self.redis, self.algorithm.agent, 0)
-        print("update set")
-
-        #assert n_envs == len(match_arg_list()) or len(match_arg_list()) == 1, \
-        #    "number of environments must match number of match arguments or be length 1"
-
-        # SOREN COMMENT: need to support multiple match args so different envs can do
-        # different things
-        self.buildWorkers(rl_exe_path, match_arg_list, n_envs=n_envs)
-
-
-    # pulled from rolv's wrapper and SB3
-    def buildWorkers(self,  match_args_func, path_to_epic_rl, n_envs=1, wait_time=60):
-        env_fns = [match_args_func for _ in range(n_envs)]
-
-        forkserver_available = "forkserver" in mp.get_all_start_methods()
-        start_method = "forkserver" if forkserver_available else "spawn"
-        ctx = mp.get_context(start_method)
-
-        remotes, work_remotes = zip(*[ctx.Pipe() for _ in range(n_envs)])
-        for work_remote, remote, env_fn in zip(work_remotes, remotes, env_fns):
-            #args = (path_to_epic_rl, 1, match_args_func) # ** test this, probably wrong
-            args = () #(work_remote, remote, CloudpickleWrapper(env_fn))
-            process = ctx.Process(target=Worker, args=args, daemon=True)
-            process.start()
-
-            self.workers.append(process)
-            work_remote.close()
-            time.sleep(wait_time)
-
-
-    def learn(self, n_rollouts = 36):
-        # SOREN COMMENT: what's a good model number scheme and do you account for continuing
-        # training from a saved model?
-
-        model_version = 0
-
-        # SOREN COMMENT: this is an ugly way of doing it
-        traj_count = 0
-        while True:
-            data = self.recieve_worker_data()
-            print("data:")
-            print(data)
-            for d in data:
-                print(d)
-                self.buffer.add_step(data)
-            traj_count += 1
-
-            if traj_count >= n_rollouts:
-                self.__calculate__(self.buffer)
-
-                #save model
-                model_file = open("model_v"+str(model_version), "w")
-                model_file.write(msgpack.dumps(self.algorithm.agent))
-                model_file.close()
-
-                #transmit model updates to workers
-                worker.update_model(self.redit, self.algorithm.agent, model_version)
-
-                self.buffer.clear()
-                model_version += 1
-                traj_count = 0
-
-                # SOREN COMMENT: add in launching extra workers after X amount of time
-
-
-    def recieve_worker_data(self):
-        while True:
-            # **MOVE ALL KEYS TO SEPARATE FILE**
-            item = self.redis.lpop(worker.ROLLOUTS)
-            if item is not None:
-                rollout = msgpack.loads(item)
-                yield rollout
-            else:
-                time.sleep(10)
-
-
-
-    def __calculate__(self):
-        #apply PPO now but separate so we can refactor to allow different algorithm types
-        self.algorithm.calculate(self.buffer)
-
-
-
-#this should probably be in its own file
+# this should probably be in its own file
 class PPO:
-    def __init__(self, actor, critic, lr_actor = 3e-4, lr_critic = 3e-4, gamma = 0.9, epochs = 1):
+    def __init__(self, rollout_generator: BaseRolloutGenerator, actor, critic, lr_actor=3e-4, lr_critic=3e-4, gamma=0.9, epochs=1):
+        self.rollout_generator = rollout_generator
+        self.agent = PPOAgent(actor, critic)  # TODO let users choose their own agent
 
-        self.agent = PPOAgent(actor, critic)
-        self.actor = actor
-        self.critic = critic
-
-        #hyperparameters
+        # hyperparameters
         self.epochs = epochs
         self.gamma = gamma
+        self.n_rollouts = 36
+        self.lmbda = 1.
         self.gae_lambda = 0
         self.batch_size = 512
         self.clip_range = .2
@@ -159,6 +51,25 @@ class PPO:
             {'params': self.agent.actor.parameters(), 'lr': lr_actor},
             {'params': self.agent.critic.parameters(), 'lr': lr_critic}
         ])
+
+    def run(self):
+        while True:
+            rollout_gen = self.rollout_generator.generate_rollouts()
+
+            # SOREN COMMENT: this is an ugly way of doing it
+            while True:
+                rollouts = []
+                while len(rollouts) < self.n_rollouts:
+                    try:
+                        rollout = next(rollout_gen)
+                        rollouts.append(rollout)
+                    except StopIteration:
+                        return
+
+                for rollout in rollouts:
+                    self.calculate(rollout)
+
+                self.rollout_generator.update_parameters(self.agent)
 
     def set_logger(self, logger):
         self.logger = logger
@@ -172,33 +83,39 @@ class PPO:
         return -1, -1
 
     def calculate(self, buffer: ExperienceBuffer):
+        # buffer = th.zeros((self.batch_size, 67))  # TODO extract and shuffle from input
+        print("Opt step")
+        return
         values = self.agent.critic(buffer)
         buffer_size = buffer.size()
 
-        #totally stole this section from
-        #https://towardsdatascience.com/proximal-policy-optimization-tutorial-part-2-2-gae-and-ppo-loss-fe1b3c5549e8
-        #I am not attached to it, make it better if you'd like
+        # totally stole this section from
+        # https://towardsdatascience.com/proximal-policy-optimization-tutorial-part-2-2-gae-and-ppo-loss-fe1b3c5549e8
+        # I am not attached to it, make it better if you'd like
         returns = []
         gae = 0
         for i in reversed(range(buffer_size)):
             delta = buffer.rewards[i] + self.gamma * values[i + 1] * buffer.dones[i] - values[i]
-            gae = delta + self.gamma * lmbda * buffer.dones[i] * gae
+            gae = delta + self.gamma * self.lmbda * buffer.dones[i] * gae
             returns.insert(0, gae + values[i])
 
         advantages = np.array(returns) - values[:-1]
         advantages = (advantages - np.mean(advantages)) / (np.std(advantages) + 1e-10)
-        #returns is also called references?
+        # returns is also called references?
 
         for e in range(self.epochs):
             # SOREN COMMENT:
             # I'm going with SB3 PPO implementation cause we'll have a reference
 
             # this is mostly pulled from sb3
-            for i, rollout in enumerate(self.buffer.generate_rollouts(self.batch_size)):
-                adv = self.advantages[i:i+batch_size]
+            for i, rollout in enumerate(buffer.generate_slices(self.batch_size)):
+                print("Optimizer step", i)
+                continue
+                adv = advantages[i:i + self.batch_size]
 
                 log_prob, entropy = self.evaluate_actions()
-                ratio = torch.exp(log_prob - rollout.old_log_prob)
+                old_log_prob = rollout.log_prob
+                ratio = torch.exp(log_prob - old_log_prob)
 
                 # clipped surrogate loss
                 policy_loss_1 = adv * ratio
@@ -226,5 +143,4 @@ class PPO:
                 nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
-
-                #self.logger write here to log results
+                # self.logger write here to log results

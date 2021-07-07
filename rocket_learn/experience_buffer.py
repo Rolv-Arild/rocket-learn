@@ -40,7 +40,7 @@ class ExperienceBuffer:
         self.dones = []
         self.log_prob = []
 
-    def generate_rollouts(self, batch_size):
+    def generate_slices(self, batch_size):
         for i in range(0, len(self.observations), batch_size):
             yield ExperienceBuffer(self.observations[i:i+batch_size],
                                    self.actions[i:i+batch_size],

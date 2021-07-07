@@ -1,24 +1,25 @@
-from typing import Generator
+from typing import Generator, Iterable
 
 from torch.nn import Module
 
 import rlgym
+from rocket_learn.agent import BaseAgent
 from rocket_learn.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
 from rocket_learn.utils.util import generate_episode
 
 
 class SimpleRolloutGenerator(BaseRolloutGenerator):
-    def __init__(self, net: Module, **make_args):
+    def __init__(self, agent: BaseAgent, **make_args):
         self.env = rlgym.make(**make_args)
-        self.net = net
+        self.agent = agent
         self.n_agents = self.env._match.agents
 
-    def generate_rollouts(self) -> Generator[ExperienceBuffer]:
+    def generate_rollouts(self) -> Iterable[ExperienceBuffer]:
         while True:
-            rollouts = generate_episode(self.env, [self.net] * self.n_agents)
+            rollouts = generate_episode(self.env, [self.agent] * self.n_agents)
 
             yield from rollouts
 
     def update_parameters(self, new_params):
-        self.net.load_state_dict(new_params)
+        self.agent.set_model_params(new_params)

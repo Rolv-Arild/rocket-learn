@@ -1,10 +1,14 @@
 from typing import List
 
+import numpy as np
+
 from rlgym.gym import Gym
-from experience_buffer import ExperienceBuffer
+from rocket_learn.experience_buffer import ExperienceBuffer
+
+from rocket_learn.agent import BaseAgent
 
 
-def generate_episode(env: Gym, agents: list) -> List[ExperienceBuffer]:
+def generate_episode(env: Gym, agents: List[BaseAgent]) -> List[ExperienceBuffer]:
     observations = env.reset()
     done = False
 
@@ -22,14 +26,21 @@ def generate_episode(env: Gym, agents: list) -> List[ExperienceBuffer]:
         # SOREN COMMENT:
         # Aren't we leaving that to the agents?
 
-
-        actions = [agent.get_actions(obs) for obs, agent in zip(observations, agents)]
-        log_probs = [agent.get_log_prob(action) for agent, actions in zip(agents, actions)]
+        actions_probs = [agent.get_action_with_log_prob(obs) for obs, agent in zip(observations, agents)]
+        actions, log_probs = zip(*actions_probs)
 
         old_obs = observations
         observations, rewards, done, info = env.step(actions)
+        if len(agents) <= 1:
+            observations, rewards = [observations], [rewards]
         # Might be different if only one agent?
         for exp_buf, obs, act, rew, log_prob in zip(rollouts, old_obs, actions, rewards, log_probs):
             exp_buf.add_step(obs, act, rew, done, log_prob)
 
     return rollouts
+
+
+def softmax(x):
+    """Compute softmax values for each sets of scores in x."""
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum()
