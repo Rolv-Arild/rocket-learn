@@ -59,7 +59,6 @@ class PPO:
         while True:
             rollout_gen = self.rollout_generator.generate_rollouts()
 
-            # SOREN COMMENT: this is an ugly way of doing it
             while True:
                 rollouts = []
                 while len(rollouts) < self.n_rollouts:
@@ -69,8 +68,7 @@ class PPO:
                     except StopIteration:
                         return
 
-                for rollout in rollouts:
-                    self.calculate(rollout)
+                self.calculate(rollouts)
 
                 self.rollout_generator.update_parameters(self.agent)
 
@@ -81,9 +79,12 @@ class PPO:
         networks = [self.agent.actor.get_state_dict(), self.agent.critic.get_state_dict()]
         return networks
 
-    def evaluate_actions(self):
-        ## **TODO**
-        raise NotImplementedError
+    def evaluate_actions(self, observations, actions):
+        dists = self.agent.get_action_distribution(observations)
+        indices, log_prob, entropy = self.agent.get_action_indices(dists, include_log_prob=True, include_entropy=True)
+        # TODO finish
+
+        return log_prob, entropy
 
     def calculate(self, buffers: List[ExperienceBuffer]):
         obs_tensors = []

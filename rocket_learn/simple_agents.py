@@ -3,6 +3,7 @@ from typing import Tuple
 import numpy as np
 import torch
 import torch as th
+from torch import nn
 from torch.distributions import Categorical
 import pickle
 from agent import BaseAgent
@@ -47,28 +48,26 @@ class RandomAgent(BaseAgent):
 
 # ** This should be in its own file or packaged with PPO **
 class PPOAgent(BaseAgent):
-    def __init__(self, actor, critic):
+    def __init__(self, actor: nn.Module, critic: nn.Module):
         super().__init__()
         self.actor = actor
         self.critic = critic
 
-    def get_actions(self, observation, deterministic=False):
-        return self.actor(observation)
+    def forward_actor_critic(self, obs):
+        return self.forward_actor(obs), self.forward_critic(obs)
 
-    def get_action_with_log_prob(self, observation) -> Tuple[np.ndarray, float]:
-        return np.zeros(8), 0.
+    def forward_actor(self, obs):
+        return self.actor(obs)
 
-    def set_model_params(self, params):
-        pass
+    def forward_critic(self, obs):
+        return self.critic(obs)
 
-    def serialize(self):
-        # **TODO **
-        nets = [self.actor, self.critic]
-        return pickle.dumps(self)
+    def get_model_params(self, params):
+        return self.actor.state_dict(), self.critic.state_dict()
 
-    def unserialize(self, pickle_data):
-        # **TODO **
-        return
+    def set_model_params(self, params) -> None:
+        self.actor.load_state_dict(params[0])
+        self.critic.load_state_dict(params[1])
 
 
 class NoOpAgent(BaseAgent):

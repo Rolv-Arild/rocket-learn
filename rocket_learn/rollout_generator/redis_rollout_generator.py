@@ -1,7 +1,7 @@
 import os
 import pickle
 import time
-from typing import Generator, Iterable
+from typing import Generator, Iterator
 
 import numpy as np
 from redis import Redis
@@ -33,7 +33,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.n_updates = 0
         self.save_every = save_every
 
-    def generate_rollouts(self) -> Iterable[ExperienceBuffer]:
+    def generate_rollouts(self) -> Iterator[ExperienceBuffer]:
         while True:
             rollout = self.redis.lpop(ROLLOUTS)
             if rollout is not None:  # Assuming nil is converted to None by py-redis

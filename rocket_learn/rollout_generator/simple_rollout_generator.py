@@ -1,4 +1,4 @@
-from typing import Generator, Iterable
+from typing import Generator, Iterator
 
 from torch.nn import Module
 
@@ -15,7 +15,7 @@ class SimpleRolloutGenerator(BaseRolloutGenerator):
         self.agent = agent
         self.n_agents = self.env._match.agents
 
-    def generate_rollouts(self) -> Iterable[ExperienceBuffer]:
+    def generate_rollouts(self) -> Iterator[ExperienceBuffer]:
         while True:
             rollouts = generate_episode(self.env, [self.agent] * self.n_agents)
 
