@@ -18,3 +18,13 @@ class BaseAgent(ABC):
         raise NotImplementedError
 
 
+class ActorCriticAgent(BaseAgent, ABC):
+    @abstractmethod
+    def forward_actor_critic(self, obs) -> Tuple:
+        raise NotImplementedError
+
+    def forward_actor(self, obs):
+        return self.forward_actor_critic(obs)[0]
+
+    def critic_actor(self, obs):
+        return self.forward_actor_critic(obs)[1]

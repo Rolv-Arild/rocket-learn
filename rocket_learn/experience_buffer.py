@@ -18,7 +18,7 @@ class ExperienceBuffer:
             self.rewards = rewards
 
         if dones is not None:
-            self.dones = dones
+            self.dones = dones  # TODO Done probably doesn't need to be a list, will always just be false until last?
 
         if log_prob is not None:
             self.log_prob = log_prob
