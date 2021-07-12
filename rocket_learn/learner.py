@@ -34,7 +34,8 @@ class CloudpickleWrapper:
 
 # this should probably be in its own file
 class PPO:
-    def __init__(self, rollout_generator: BaseRolloutGenerator, actor, critic, n_rollouts=36, lr_actor=3e-4, lr_critic=3e-4, gamma=0.9,
+    def __init__(self, rollout_generator: BaseRolloutGenerator, actor, critic, n_rollouts=36, lr_actor=3e-4,
+                 lr_critic=3e-4, gamma=0.9,
                  epochs=1):
         self.rollout_generator = rollout_generator
         self.agent = PPOAgent(actor, critic)  # TODO let users choose their own agent
@@ -86,11 +87,12 @@ class PPO:
         # Thanks Rangler!
         new_raw_a_probs = self.agent.forward_actor(observations)
 
-        #I need to change this
-        new_cat_a_probs = th.cat((new_raw_a_probs[0], new_raw_a_probs[1], new_raw_a_probs[2], new_raw_a_probs[3], new_raw_a_probs[4]), 1)
+        # I need to change this
+        new_cat_a_probs = th.cat(
+            (new_raw_a_probs[0], new_raw_a_probs[1], new_raw_a_probs[2], new_raw_a_probs[3], new_raw_a_probs[4]), 1)
         new_cat_probs = new_cat_a_probs.gather(1, actions[:, :5])
 
-        #new_ber_a_probs = th.stack(dists[5:])
+        # new_ber_a_probs = th.stack(dists[5:])
         new_ber_a_probs = th.cat((new_raw_a_probs[5], new_raw_a_probs[6], new_raw_a_probs[7]), 1)
         new_ber_probs = new_ber_a_probs.gather(1, actions[:, 5:])
 
@@ -142,8 +144,8 @@ class PPO:
         #     gae = delta + self.gamma * self.lmbda * buffer.dones[i] * gae
         #     returns.insert(0, gae + values[i])
 
-        #advantages = rew_tensor - rew_tensor[:-1]
-#TEMP FOR DEBUGGING
+        # advantages = rew_tensor - rew_tensor[:-1]
+        # TEMP FOR DEBUGGING
         advantages = rew_tensor
 
         advantages = (advantages - th.mean(advantages)) / (th.std(advantages) + 1e-10)
@@ -153,22 +155,18 @@ class PPO:
             # SOREN COMMENT:
             # I'm going with SB3 PPO implementation cause we'll have a reference
 
-            #SOREN COMMENT:
-            #I moved this out here so it only runs once. I think its fine
-            log_prob_new, entropy = self.evaluate_actions(obs_tensor, act_tensor)  # Assuming obs and actions as input
-
             # this is mostly pulled from sb3
             for i in range(0, obs_tensor.shape[0] - self.batch_size, self.batch_size):
                 # Note: Will cut off final few samples
 
-
-
+                obs = obs_tensor[i: i + self.batch_size]
+                act = act_tensor[i: i + self.batch_size]
                 adv = advantages[i:i + self.batch_size]
                 rew = rew_tensor[i: i + self.batch_size]
                 old_log_prob = log_prob_tensor[i: i + self.batch_size]
-                log_prob = log_prob_new[i: i + self.batch_size]
+                # log_prob = log_prob_new[i: i + self.batch_size]
 
-
+                log_prob, entropy = self.evaluate_actions(obs, act)  # Assuming obs and actions as input
                 ratio = torch.exp(log_prob - old_log_prob)
 
                 # clipped surrogate loss
