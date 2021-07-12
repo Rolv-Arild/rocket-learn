@@ -32,8 +32,12 @@ class BaseAgent(ABC):
         return self.forward_actor_critic(obs)[1]
 
     def get_action_distribution(self, obs) -> List[Categorical]:
+        if type(obs) is np.ndarray:
+            obs = th.from_numpy(obs)
         logits = self.forward_actor(obs)
+
         return [Categorical(logits=logit) for logit in logits]
+
 
     def get_action_indices(self, distribution: List[Categorical], deterministic=False, include_log_prob=False,
                            include_entropy=False):
@@ -41,11 +45,15 @@ class BaseAgent(ABC):
             action_indices = th.stack([th.argmax(dist.logits) for dist in distribution])
         else:
             action_indices = th.stack([dist.sample() for dist in distribution])
+
         returns = [action_indices.numpy()]
         if include_log_prob:
+            # SOREN NOTE:
+            # adding dim=1 is causing it to crash
+
             log_prob = th.stack(
-                [dist.log_prob(action) for dist, action in zip(distribution, th.unbind(action_indices, dim=1))], dim=1
-            ).sum(dim=1)
+                [dist.log_prob(action) for dist, action in zip(distribution, action_indices)]
+            ).sum()
             returns.append(log_prob)
         if include_entropy:
             entropy = th.stack([dist.entropy() for dist in distribution], dim=1).sum(dim=1)

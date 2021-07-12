@@ -31,6 +31,11 @@ def generate_episode(env: Gym, agents: List[BaseAgent]) -> List[ExperienceBuffer
         all_indices = []
         all_actions = []
         all_log_probs = []
+
+        #if observation isn't a list, make it one so we don't iterate over the observation directly
+        if not isinstance(observations, list):
+            observations = [observations]
+
         for agent, obs in zip(agents, observations):
             dist = agent.get_action_distribution(obs)
             action_indices, log_prob = agent.get_action_indices(dist, deterministic=False, include_log_prob=True)

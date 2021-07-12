@@ -6,7 +6,8 @@ import torch as th
 from torch import nn
 from torch.distributions import Categorical
 import pickle
-from agent import BaseAgent
+
+from rocket_learn.agent import BaseAgent
 
 
 class RandomAgent(BaseAgent):
