@@ -71,7 +71,8 @@ class PPO:
 
                 self.calculate(rollouts)
 
-                self.rollout_generator.update_parameters(self.agent)
+                self.rollout_generator.update_parameters([self.agent.actor.state_dict(),
+                                                          self.agent.critic.state_dict()])
 
     def set_logger(self, logger):
         self.logger = logger
@@ -109,50 +110,56 @@ class PPO:
         act_tensors = []
         log_prob_tensors = []
         rew_tensors = []
+        done_tensors = []
 
         for buffer in buffers:
             obs_tensor = th.as_tensor(np.stack(buffer.observations))
             act_tensor = th.as_tensor(np.stack(buffer.actions))
             log_prob_tensor = th.as_tensor(buffer.log_prob)
             rew_tensor = th.as_tensor(buffer.rewards)  # TODO discounted rewards (returns? not in python preferably)
+            done_tensor = th.as_tensor(buffer.dones)
 
             obs_tensors.append(obs_tensor)
             act_tensors.append(act_tensor)
             log_prob_tensors.append(log_prob_tensor)
             rew_tensors.append(rew_tensor)
+            done_tensors.append(done_tensor)
 
         # Set device?
         # THIS NEEDS TO HAPPEN AFTER ADV IS CALCULATED
         obs_tensor = th.cat(obs_tensors)
-        indices = torch.randperm(obs_tensor.shape[0])
-        obs_tensor = obs_tensor[indices]  # Shuffling
-
-        act_tensor = th.cat(act_tensors)[indices]
-        log_prob_tensor = th.cat(log_prob_tensors)[indices]
-        rew_tensor = th.cat(rew_tensors)[indices]
+        act_tensor = th.cat(act_tensors)
+        log_prob_tensor = th.cat(log_prob_tensors)
+        rew_tensor = th.cat(rew_tensors)
+        done_tensor = th.cat(done_tensors)
 
         values = self.agent.critic(obs_tensor)
 
-        #
-        #
         # # totally stole this section from
         # # https://towardsdatascience.com/proximal-policy-optimization-tutorial-part-2-2-gae-and-ppo-loss-fe1b3c5549e8
         # # I am not attached to it, make it better if you'd like
-        #returns = []
-        #gae = 0
-        #buffer_size = buffer.size()
+        returns = []
+        gae = 0
+        size = rew_tensor.size()[0]
 
-        #for i in reversed(range(buffer_size)):
-        #     delta = rew_tensor[i] + self.gamma * values[i + 1] * done_tensor[i] - values[i]
-        #     gae = delta + self.gamma * self.lmbda * done_tensor[i] * gae
-        #     returns.insert(0, gae + values[i])
-        #advantages = returns - values[:-1]
+        # This cuts off the first item and can be improved
+        for i in reversed(range(size-1)):
+             delta = rew_tensor[i] + self.gamma * values[i + 1] * done_tensor[i] - values[i]
+             gae = delta + self.gamma * self.lmbda * done_tensor[i] * gae
+             returns.insert(0, gae + values[i])
 
-        #TEMPORARY FOR DEBUGGING
-        advantages = rew_tensor
-
+        returns = th.stack(returns)
+        advantages = returns - values[:-1]
         advantages = (advantages - th.mean(advantages)) / (th.std(advantages) + 1e-10)
-        # returns is also called references?
+
+        # shuffle data
+        indices = torch.randperm(advantages.shape[0])
+        obs_tensor = obs_tensor[indices]
+        act_tensor = act_tensor[indices]
+        log_prob_tensor = log_prob_tensor[indices]
+        advantages = advantages[indices]
+        returns = returns[indices]
+        values = values[indices]
 
         for e in range(self.epochs):
             # this is mostly pulled from sb3
@@ -162,7 +169,9 @@ class PPO:
                 obs = obs_tensor[i: i + self.batch_size]
                 act = act_tensor[i: i + self.batch_size]
                 adv = advantages[i:i + self.batch_size]
-                rew = rew_tensor[i: i + self.batch_size]
+                rew = returns[i: i + self.batch_size]
+                val = values[i: i + self.batch_size]
+
                 old_log_prob = log_prob_tensor[i: i + self.batch_size]
 
                 log_prob, entropy = self.evaluate_actions(obs, act)  # Assuming obs and actions as input
@@ -174,7 +183,7 @@ class PPO:
                 policy_loss = -torch.min(policy_loss_1, policy_loss_2).mean()
 
                 # **If we want value clipping, add it here**
-                value_loss = F.mse_loss(rew, values)
+                value_loss = F.mse_loss(rew, val)
 
                 if entropy is None:
                     # Approximate entropy when no analytical form
@@ -189,7 +198,10 @@ class PPO:
                     approx_kl_div = torch.mean((torch.exp(log_ratio) - 1) - log_ratio).cpu().numpy()
 
                 self.optimizer.zero_grad()
+
+                assert False and "fix loss.backward() bug"
                 loss.backward()
+                
                 # Clip grad norm
                 if self.max_grad_norm is not None:
                     nn.utils.clip_grad_norm_(self.agent.actor.parameters(), self.max_grad_norm)
