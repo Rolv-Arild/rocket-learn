@@ -127,13 +127,13 @@ class PPO:
 
         # Set device?
         # THIS NEEDS TO HAPPEN AFTER ADV IS CALCULATED
-        obs_tensor = th.cat(obs_tensors)
+        obs_tensor = th.cat(obs_tensors).float()
         act_tensor = th.cat(act_tensors)
-        log_prob_tensor = th.cat(log_prob_tensors)
-        rew_tensor = th.cat(rew_tensors)
+        log_prob_tensor = th.cat(log_prob_tensors).float()
+        rew_tensor = th.cat(rew_tensors).float()
         done_tensor = th.cat(done_tensors)
 
-        values = self.agent.critic(obs_tensor)
+        values = self.agent.forward_critic(obs_tensor)
 
         # # totally stole this section from
         # # https://towardsdatascience.com/proximal-policy-optimization-tutorial-part-2-2-gae-and-ppo-loss-fe1b3c5549e8
@@ -199,7 +199,6 @@ class PPO:
 
                 self.optimizer.zero_grad()
 
-                assert False and "fix loss.backward() bug"
                 loss.backward()
                 
                 # Clip grad norm

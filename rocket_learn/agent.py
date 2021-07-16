@@ -33,7 +33,7 @@ class BaseAgent(ABC):
 
     def get_action_distribution(self, obs) -> List[Categorical]:
         if isinstance(obs, np.ndarray):
-            obs = th.from_numpy(obs)
+            obs = th.from_numpy(obs).float()
         logits = self.forward_actor(obs)
 
         return [Categorical(logits=logit) for logit in logits]
