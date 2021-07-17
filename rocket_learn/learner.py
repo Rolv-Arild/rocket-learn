@@ -5,7 +5,6 @@ import numpy as np
 import torch
 import torch as th
 import torch.nn as nn
-from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
 
 from rocket_learn.experience_buffer import ExperienceBuffer
@@ -86,7 +85,9 @@ class PPO:
         indices = self.agent.get_action_indices(dists)
 
         # Thanks Rangler!
-        new_raw_a_probs = self.agent.forward_actor(observations)
+        new_raw_a_logits = self.agent.forward_actor(observations)
+
+        new_raw_a_probs = [F.softmax(a_logit, dim=-1) for a_logit in new_raw_a_logits]
 
         new_cat_a_probs = th.cat(
             (new_raw_a_probs[0], new_raw_a_probs[1], new_raw_a_probs[2], new_raw_a_probs[3], new_raw_a_probs[4]), 1)
@@ -163,7 +164,7 @@ class PPO:
 
         for e in range(self.epochs):
             # this is mostly pulled from sb3
-            for i in range(0, obs_tensor.shape[0] - self.batch_size, self.batch_size):
+            for i in range(0, obs_tensor.shape[0], self.batch_size):
                 # Note: Will cut off final few samples
 
                 obs = obs_tensor[i: i + self.batch_size]
