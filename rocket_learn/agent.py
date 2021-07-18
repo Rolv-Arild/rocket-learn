@@ -10,14 +10,7 @@ class BaseAgent(ABC):
     def __init__(self, index_action_map: Optional[np.ndarray] = None):
         if index_action_map is None:
             self.index_action_map = np.array([
-                [-1., 0., 1.],
-                [-1., 0., 1.],
-                [-1., 0., 1.],
-                [-1., 0., 1.],
-                [-1., 0., 1.],
-                [0., 1., np.nan],
-                [0., 1., np.nan],
-                [0., 1., np.nan]
+                [0., 1., 1.],
             ])
         else:
             self.index_action_map = index_action_map

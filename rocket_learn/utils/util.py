@@ -20,14 +20,6 @@ def generate_episode(env: Gym, agents: List[BaseAgent]) -> List[ExperienceBuffer
     ]
 
     while not done:
-        # TODO we need either:
-        # - torch.distributions.Distribution
-        # - (selected_action, <log_>prob) tuple
-        # - logits for actions, 3*5+2*3=21 outputs
-        # to calculate log_prob
-        # SOREN COMMENT:
-        # Aren't we leaving that to the agents?
-
         all_indices = []
         all_actions = []
         all_log_probs = []
@@ -46,9 +38,13 @@ def generate_episode(env: Gym, agents: List[BaseAgent]) -> List[ExperienceBuffer
             all_log_probs.append(log_prob)
 
         old_obs = observations
-        observations, rewards, done, info = env.step(all_actions)
+        ex = env.action_space.sample()
+        cleanedAction = int(all_actions[0].item())
+        observations, rewards, done, info = env.step(cleanedAction)
+
         if len(agents) <= 1:
             observations, rewards = [observations], [rewards]
+
         # Might be different if only one agent?
         for exp_buf, obs, act, rew, log_prob in zip(rollouts, old_obs, all_indices, rewards, all_log_probs):
             exp_buf.add_step(obs, act, rew, done, log_prob)

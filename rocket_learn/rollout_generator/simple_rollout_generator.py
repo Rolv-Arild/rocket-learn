@@ -2,7 +2,7 @@ from typing import Generator, Iterator
 
 from torch.nn import Module
 
-import rlgym
+import gym
 from rocket_learn.agent import BaseAgent
 from rocket_learn.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
@@ -11,9 +11,9 @@ from rocket_learn.utils.util import generate_episode
 
 class SimpleRolloutGenerator(BaseRolloutGenerator):
     def __init__(self, agent: BaseAgent, **make_args):
-        self.env = rlgym.make(**make_args)
+        self.env = gym.make('CartPole-v0')
         self.agent = agent
-        self.n_agents = self.env._match.agents
+        self.n_agents = 1
 
     def generate_rollouts(self) -> Iterator[ExperienceBuffer]:
         while True:

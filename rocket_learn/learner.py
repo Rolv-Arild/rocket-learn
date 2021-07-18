@@ -34,8 +34,7 @@ class CloudpickleWrapper:
 # this should probably be in its own file
 class PPO:
     def __init__(self, rollout_generator: BaseRolloutGenerator, actor, critic, n_rollouts=36, lr_actor=3e-4,
-                 lr_critic=3e-4, gamma=0.9,
-                 epochs=1):
+                 lr_critic=3e-4, gamma=0.95, batch_size=512,epochs=1):
         self.rollout_generator = rollout_generator
         self.agent = PPOAgent(actor, critic)  # TODO let users choose their own agent
 
@@ -45,7 +44,7 @@ class PPO:
         self.n_rollouts = n_rollouts
         self.lmbda = 1.
         self.gae_lambda = 0
-        self.batch_size = 512
+        self.batch_size = batch_size
         self.clip_range = .2
         self.ent_coef = 1
         self.vf_coef = 1
@@ -89,20 +88,19 @@ class PPO:
 
         new_raw_a_probs = [F.softmax(a_logit, dim=-1) for a_logit in new_raw_a_logits]
 
-        new_cat_a_probs = th.cat(
-            (new_raw_a_probs[0], new_raw_a_probs[1], new_raw_a_probs[2], new_raw_a_probs[3], new_raw_a_probs[4]), 1)
-        new_cat_probs = new_cat_a_probs.gather(1, actions[:, :5])
+        new_cat_a_probs = new_raw_a_probs[0]
+        new_cat_probs = new_cat_a_probs.gather(1, actions)
 
         # new_ber_a_probs = th.stack(dists[5:])
-        new_ber_a_probs = th.cat((new_raw_a_probs[5], new_raw_a_probs[6], new_raw_a_probs[7]), 1)
-        new_ber_probs = new_ber_a_probs.gather(1, actions[:, 5:])
+        #ew_ber_a_probs = th.cat((new_raw_a_probs[5], new_raw_a_probs[6], new_raw_a_probs[7]), 1)
+        #new_ber_probs = new_ber_a_probs.gather(1, actions[:, 5:])
 
-        log_prob = torch.cat([new_cat_probs, new_ber_probs], dim=1)
+        log_prob = new_cat_probs
         log_prob = log_prob.sum(dim=1)
 
         cat_entropy = torch.sum(new_cat_a_probs * torch.log(new_cat_a_probs + 1e-10), dim=(0, 1))
-        ber_entropy = torch.sum(new_ber_a_probs * torch.log(new_ber_a_probs + 1e-10), dim=(0, 1))
-        entropy = -torch.mean(cat_entropy + ber_entropy)
+        #ber_entropy = torch.sum(new_ber_a_probs * torch.log(new_ber_a_probs + 1e-10), dim=(0, 1))
+        entropy = -torch.mean(cat_entropy)
 
         return log_prob, entropy
 
@@ -133,6 +131,8 @@ class PPO:
         log_prob_tensor = th.cat(log_prob_tensors).float()
         rew_tensor = th.cat(rew_tensors).float()
         done_tensor = th.cat(done_tensors)
+
+        print(th.sum(rew_tensor))
 
         with th.no_grad():
             values = self.agent.forward_critic(obs_tensor)
