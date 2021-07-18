@@ -134,11 +134,10 @@ class PPO:
         rew_tensor = th.cat(rew_tensors).float()
         done_tensor = th.cat(done_tensors)
 
-        values = self.agent.forward_critic(obs_tensor)
+        with th.no_grad():
+            values = self.agent.forward_critic(obs_tensor)
 
-        # # totally stole this section from
-        # # https://towardsdatascience.com/proximal-policy-optimization-tutorial-part-2-2-gae-and-ppo-loss-fe1b3c5549e8
-        # # I am not attached to it, make it better if you'd like
+        # this is running, should we switch to Sb3 code?
         returns = []
         gae = 0
         size = rew_tensor.size()[0]
@@ -152,6 +151,24 @@ class PPO:
         returns = th.stack(returns)
         advantages = returns - values[:-1]
         advantages = (advantages - th.mean(advantages)) / (th.std(advantages) + 1e-10)
+        advantages.detach_() #is this needed with values being detached already?
+
+        # **sb3 version if we want it**
+        #last_values = last_values.clone().cpu().numpy().flatten()
+        #last_gae_lam = 0
+        #for step in reversed(range(size)):
+        #    if step == size - 1:
+        #        next_non_terminal = 1.0 - done_tensor
+        #        next_values = last_values
+        #    else:
+        #        next_non_terminal = 1.0 - self.episode_starts[step + 1]
+        #        next_values = self.values[step + 1]
+        #    delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - self.values[step]
+        #    last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
+        #    self.advantages[step] = last_gae_lam
+        #self.returns = self.advantages + self.values
+
+
 
         # shuffle data
         indices = torch.randperm(advantages.shape[0])
@@ -160,7 +177,6 @@ class PPO:
         log_prob_tensor = log_prob_tensor[indices]
         advantages = advantages[indices]
         returns = returns[indices]
-        values = values[indices]
 
         for e in range(self.epochs):
             # this is mostly pulled from sb3
@@ -171,7 +187,6 @@ class PPO:
                 act = act_tensor[i: i + self.batch_size]
                 adv = advantages[i:i + self.batch_size]
                 rew = returns[i: i + self.batch_size]
-                val = values[i: i + self.batch_size]
 
                 old_log_prob = log_prob_tensor[i: i + self.batch_size]
 
@@ -184,7 +199,9 @@ class PPO:
                 policy_loss = -torch.min(policy_loss_1, policy_loss_2).mean()
 
                 # **If we want value clipping, add it here**
-                value_loss = F.mse_loss(rew, val)
+                val = self.agent.forward_critic(obs)[1:]
+                target = rew[:-1] + self.gamma * val
+                value_loss = F.mse_loss(target, val)
 
                 if entropy is None:
                     # Approximate entropy when no analytical form
