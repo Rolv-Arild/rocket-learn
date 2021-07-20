@@ -42,6 +42,10 @@ def generate_episode(env: Gym, agents: List[BaseAgent]) -> List[ExperienceBuffer
         cleanedAction = int(all_actions[0].item())
         observations, rewards, done, info = env.step(cleanedAction)
 
+
+        #if done:
+            #print(np.sum(exp_buf.rewards))
+
         if len(agents) <= 1:
             observations, rewards = [observations], [rewards]
 

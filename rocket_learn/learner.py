@@ -34,7 +34,7 @@ class CloudpickleWrapper:
 # this should probably be in its own file
 class PPO:
     def __init__(self, rollout_generator: BaseRolloutGenerator, actor, critic, n_rollouts=36, lr_actor=3e-4,
-                 lr_critic=3e-4, gamma=0.95, batch_size=512,epochs=1):
+                 lr_critic=3e-4, gamma=0.9, gae_lambda=.95, batch_size=512,epochs=1):
         self.rollout_generator = rollout_generator
         self.agent = PPOAgent(actor, critic)  # TODO let users choose their own agent
 
@@ -42,11 +42,10 @@ class PPO:
         self.epochs = epochs
         self.gamma = gamma
         self.n_rollouts = n_rollouts
-        self.lmbda = 1.
-        self.gae_lambda = 0
+        self.gae_lambda = gae_lambda
         self.batch_size = batch_size
         self.clip_range = .2
-        self.ent_coef = 1
+        self.ent_coef = .01
         self.vf_coef = 1
         self.max_grad_norm = None
         self.optimizer = torch.optim.Adam([
@@ -55,7 +54,9 @@ class PPO:
         ])
 
     def run(self):
-        while True:
+        i = 0
+        while i < 1000:
+
             rollout_gen = self.rollout_generator.generate_rollouts()
 
             while True:
@@ -67,6 +68,8 @@ class PPO:
                     except StopIteration:
                         return
 
+                i += 1
+                print(i)
                 self.calculate(rollouts)
 
                 self.rollout_generator.update_parameters([self.agent.actor.state_dict(),
@@ -124,50 +127,49 @@ class PPO:
             rew_tensors.append(rew_tensor)
             done_tensors.append(done_tensor)
 
-        # Set device?
-        # THIS NEEDS TO HAPPEN AFTER ADV IS CALCULATED
         obs_tensor = th.cat(obs_tensors).float()
         act_tensor = th.cat(act_tensors)
         log_prob_tensor = th.cat(log_prob_tensors).float()
         rew_tensor = th.cat(rew_tensors).float()
         done_tensor = th.cat(done_tensors)
 
-        print(th.sum(rew_tensor))
+        #log_prob_tensor.detach_() #sb3 is detaching this?
 
-        with th.no_grad():
-            values = self.agent.forward_critic(obs_tensor)
+        # dones shifted right by 1 and then 1 at the very beginning
+        episode_starts = np.roll(done_tensor, 1)
+        episode_starts[0] = 1
+        episode_starts = th.as_tensor(episode_starts)
 
-        # this is running, should we switch to Sb3 code?
-        returns = []
-        gae = 0
-        size = rew_tensor.size()[0]
-
-        # This cuts off the first item and can be improved
-        for i in reversed(range(size-1)):
-             delta = rew_tensor[i] + self.gamma * values[i + 1] * done_tensor[i] - values[i]
-             gae = delta + self.gamma * self.lmbda * done_tensor[i] * gae
-             returns.insert(0, gae + values[i])
-
-        returns = th.stack(returns)
-        advantages = returns - values[:-1]
-        advantages = (advantages - th.mean(advantages)) / (th.std(advantages) + 1e-10)
-        advantages.detach_() #is this needed with values being detached already?
+        print(th.sum(rew_tensor).item() / self.n_rollouts)
 
         # **sb3 version if we want it**
-        #last_values = last_values.clone().cpu().numpy().flatten()
-        #last_gae_lam = 0
-        #for step in reversed(range(size)):
-        #    if step == size - 1:
-        #        next_non_terminal = 1.0 - done_tensor
-        #        next_values = last_values
-        #    else:
-        #        next_non_terminal = 1.0 - self.episode_starts[step + 1]
-        #        next_values = self.values[step + 1]
-        #    delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - self.values[step]
-        #    last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
-        #    self.advantages[step] = last_gae_lam
-        #self.returns = self.advantages + self.values
+        size = rew_tensor.size()[0]
+        advantages = np.zeros((size), dtype=np.float32)
+        v_targets = np.zeros((size), dtype=np.float32)
 
+        #with th.no_grad():
+        values = self.agent.forward_critic(obs_tensor).detach().cpu().numpy().flatten()
+        last_values = values[-1]
+        last_gae_lam = 0
+        for step in reversed(range(size)):
+            if step == size - 1:
+                next_non_terminal = 1.0 - done_tensor[-1].item()
+                next_values = last_values
+            else:
+                next_non_terminal = 1.0 - episode_starts[step + 1].item()
+                next_values = values[step + 1]
+            v_target = rew_tensor[step] + self.gamma * next_values
+            delta = v_target * next_non_terminal - values[step]
+            last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
+            advantages[step] = last_gae_lam
+            v_targets[step] = v_target
+        returns = advantages + values
+
+        v_targets = th.as_tensor(v_targets)
+        returns = th.as_tensor(returns)
+        advantages = th.as_tensor(advantages)
+        advantages = (advantages - th.mean(advantages)) / (th.std(advantages) + 1e-8)
+        #advantages.detach_()
 
 
         # shuffle data
@@ -177,6 +179,8 @@ class PPO:
         log_prob_tensor = log_prob_tensor[indices]
         advantages = advantages[indices]
         returns = returns[indices]
+        values = values[indices]
+        v_targets = v_targets[indices]
 
         for e in range(self.epochs):
             # this is mostly pulled from sb3
@@ -186,7 +190,8 @@ class PPO:
                 obs = obs_tensor[i: i + self.batch_size]
                 act = act_tensor[i: i + self.batch_size]
                 adv = advantages[i:i + self.batch_size]
-                rew = returns[i: i + self.batch_size]
+                ret = returns[i: i + self.batch_size]
+                target = v_targets[i: i + self.batch_size]
 
                 old_log_prob = log_prob_tensor[i: i + self.batch_size]
 
@@ -199,9 +204,9 @@ class PPO:
                 policy_loss = -torch.min(policy_loss_1, policy_loss_2).mean()
 
                 # **If we want value clipping, add it here**
-                val = self.agent.forward_critic(obs)[1:]
-                target = rew[:-1] + self.gamma * val
-                value_loss = F.mse_loss(target, val)
+                values_pred = self.agent.forward_critic(obs)
+                values_pred = th.squeeze(values_pred)
+                value_loss = F.mse_loss(ret, values_pred)
 
                 if entropy is None:
                     # Approximate entropy when no analytical form
@@ -211,12 +216,7 @@ class PPO:
 
                 loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
 
-                with torch.no_grad():
-                    log_ratio = log_prob - old_log_prob
-                    approx_kl_div = torch.mean((torch.exp(log_ratio) - 1) - log_ratio).cpu().numpy()
-
                 self.optimizer.zero_grad()
-
                 loss.backward()
                 
                 # Clip grad norm
