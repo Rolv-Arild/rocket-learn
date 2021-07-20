@@ -137,6 +137,11 @@ class PPO:
         advantages = np.zeros((size), dtype=np.float32)
         v_targets = np.zeros((size), dtype=np.float32)
 
+        # dones shifted right by 1 and then 1 at the very beginning
+        episode_starts = np.roll(done_tensor, 1)
+        episode_starts[0] = 1
+        episode_starts = th.as_tensor(episode_starts)
+
         #with th.no_grad():
         values = self.agent.forward_critic(obs_tensor).detach().cpu().numpy().flatten()
         last_values = values[-1]
