@@ -34,8 +34,7 @@ class CloudpickleWrapper:
 # this should probably be in its own file
 class PPO:
     def __init__(self, rollout_generator: BaseRolloutGenerator, actor, critic, n_rollouts=36, lr_actor=3e-4,
-                 lr_critic=3e-4, gamma=0.9,
-                 epochs=1):
+                 lr_critic=3e-4, gamma=0.9, batch_size=512, epochs=1):
         self.rollout_generator = rollout_generator
         self.agent = PPOAgent(actor, critic)  # TODO let users choose their own agent
 
@@ -45,7 +44,7 @@ class PPO:
         self.n_rollouts = n_rollouts
         self.lmbda = 1.
         self.gae_lambda = 0
-        self.batch_size = 512
+        self.batch_size = batch_size
         self.clip_range = .2
         self.ent_coef = 1
         self.vf_coef = 1
@@ -93,7 +92,6 @@ class PPO:
             (new_raw_a_probs[0], new_raw_a_probs[1], new_raw_a_probs[2], new_raw_a_probs[3], new_raw_a_probs[4]), 1)
         new_cat_probs = new_cat_a_probs.gather(1, actions[:, :5])
 
-        # new_ber_a_probs = th.stack(dists[5:])
         new_ber_a_probs = th.cat((new_raw_a_probs[5], new_raw_a_probs[6], new_raw_a_probs[7]), 1)
         new_ber_probs = new_ber_a_probs.gather(1, actions[:, 5:])
 
@@ -134,39 +132,34 @@ class PPO:
         rew_tensor = th.cat(rew_tensors).float()
         done_tensor = th.cat(done_tensors)
 
-        with th.no_grad():
-            values = self.agent.forward_critic(obs_tensor)
-
-        # this is running, should we switch to Sb3 code?
-        returns = []
-        gae = 0
-        size = rew_tensor.size()[0]
-
-        # This cuts off the first item and can be improved
-        for i in reversed(range(size-1)):
-             delta = rew_tensor[i] + self.gamma * values[i + 1] * done_tensor[i] - values[i]
-             gae = delta + self.gamma * self.lmbda * done_tensor[i] * gae
-             returns.insert(0, gae + values[i])
-
-        returns = th.stack(returns)
-        advantages = returns - values[:-1]
-        advantages = (advantages - th.mean(advantages)) / (th.std(advantages) + 1e-10)
-        advantages.detach_() #is this needed with values being detached already?
-
         # **sb3 version if we want it**
-        #last_values = last_values.clone().cpu().numpy().flatten()
-        #last_gae_lam = 0
-        #for step in reversed(range(size)):
-        #    if step == size - 1:
-        #        next_non_terminal = 1.0 - done_tensor
-        #        next_values = last_values
-        #    else:
-        #        next_non_terminal = 1.0 - self.episode_starts[step + 1]
-        #        next_values = self.values[step + 1]
-        #    delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - self.values[step]
-        #    last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
-        #    self.advantages[step] = last_gae_lam
-        #self.returns = self.advantages + self.values
+        size = rew_tensor.size()[0]
+        advantages = np.zeros((size), dtype=np.float32)
+        v_targets = np.zeros((size), dtype=np.float32)
+
+        #with th.no_grad():
+        values = self.agent.forward_critic(obs_tensor).detach().cpu().numpy().flatten()
+        last_values = values[-1]
+        last_gae_lam = 0
+        for step in reversed(range(size)):
+            if step == size - 1:
+                next_non_terminal = 1.0 - done_tensor[-1].item()
+                next_values = last_values
+            else:
+                next_non_terminal = 1.0 - episode_starts[step + 1].item()
+                next_values = values[step + 1]
+            v_target = rew_tensor[step] + self.gamma * next_values
+            delta = v_target * next_non_terminal - values[step]
+            last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
+            advantages[step] = last_gae_lam
+            v_targets[step] = v_target
+        returns = advantages + values
+
+        v_targets = th.as_tensor(v_targets)
+        returns = th.as_tensor(returns)
+        advantages = th.as_tensor(advantages)
+        advantages = (advantages - th.mean(advantages)) / (th.std(advantages) + 1e-8)
+        #advantages.detach_()
 
 
 
