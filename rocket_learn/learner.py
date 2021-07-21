@@ -137,8 +137,9 @@ class PPO:
 
         # dones shifted right by 1 and then 1 at the very beginning
         episode_starts = np.roll(done_tensor, 1)
-        episode_starts[0] = 1
+        episode_starts[0] = True
         episode_starts = th.as_tensor(episode_starts)
+
 
         print(th.sum(rew_tensor).item() / self.n_rollouts)
 
@@ -169,7 +170,7 @@ class PPO:
         returns = th.as_tensor(returns)
         advantages = th.as_tensor(advantages)
         advantages = (advantages - th.mean(advantages)) / (th.std(advantages) + 1e-8)
-        #advantages.detach_()
+        advantages.detach_()
 
 
         # shuffle data
