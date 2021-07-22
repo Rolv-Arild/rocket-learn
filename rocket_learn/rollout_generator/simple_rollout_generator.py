@@ -11,7 +11,7 @@ from rocket_learn.utils.util import generate_episode
 
 class SimpleRolloutGenerator(BaseRolloutGenerator):
     def __init__(self, agent: BaseAgent, **make_args):
-        self.env = gym.make('CartPole-v0')
+        self.env = gym.make('LunarLander-v2')
         self.agent = agent
         self.n_agents = 1
 

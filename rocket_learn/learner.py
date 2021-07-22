@@ -33,8 +33,8 @@ class CloudpickleWrapper:
 
 # this should probably be in its own file
 class PPO:
-    def __init__(self, rollout_generator: BaseRolloutGenerator, actor, critic, n_rollouts=36, lr_actor=3e-4,
-                 lr_critic=3e-4, gamma=0.9, gae_lambda=.95, batch_size=512,epochs=1):
+    def __init__(self, rollout_generator: BaseRolloutGenerator, actor, critic, n_rollouts=36, lr_actor=3e-5,
+                 lr_critic=3e-5, gamma=0.9, gae_lambda=.95, batch_size=32, epochs=10):
         self.rollout_generator = rollout_generator
         self.agent = PPOAgent(actor, critic)  # TODO let users choose their own agent
 
@@ -61,7 +61,7 @@ class PPO:
 
             while True:
                 rollouts = []
-                while len(rollouts) < self.n_rollouts:
+                while len(rollouts) < self.n_rollouts:  # TODO use steps instead? (total rollout steps > desired steps)
                     try:
                         rollout = next(rollout_gen)
                         rollouts.append(rollout)
@@ -185,7 +185,7 @@ class PPO:
 
         for e in range(self.epochs):
             # this is mostly pulled from sb3
-            for i in range(0, obs_tensor.shape[0], self.batch_size):
+            for i in range(0, obs_tensor.shape[0] - self.batch_size, self.batch_size):
                 # Note: Will cut off final few samples
 
                 obs = obs_tensor[i: i + self.batch_size]
@@ -211,7 +211,7 @@ class PPO:
 
                 if entropy is None:
                     # Approximate entropy when no analytical form
-                    entropy_loss = -torch.mean(-log_prob)
+                    entropy_loss = -th.mean(-log_prob)
                 else:
                     entropy_loss = entropy
 
