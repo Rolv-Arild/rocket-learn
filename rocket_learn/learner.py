@@ -181,8 +181,8 @@ class PPO:
                     else:
                         next_non_terminal = 1.0 - episode_starts[step + 1].item()
                         next_values = values[step + 1]
-                    v_target = rew_tensor[step] + self.gamma * next_values
-                    delta = v_target * next_non_terminal - values[step]
+                    v_target = rew_tensor[step] + self.gamma * next_values * next_non_terminal
+                    delta = v_target - values[step]
                     last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
                     advantages[step] = last_gae_lam
                     v_targets[step] = v_target
