@@ -15,7 +15,9 @@ from rocket_learn.simple_agents import PPOAgent
 class CloudpickleWrapper:
     """
     ** Copied from SB3 **
+
     Uses cloudpickle to serialize contents (otherwise multiprocessing tries to use pickle)
+
     :param var: the variable you wish to wrap for pickling with cloudpickle
     """
 

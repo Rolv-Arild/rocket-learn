@@ -9,9 +9,9 @@ from torch.distributions import Categorical
 class BaseAgent(ABC):
     def __init__(self, index_action_map: Optional[np.ndarray] = None):
         if index_action_map is None:
-            self.index_action_map = np.array([
-                [0., 1., 1.],
-            ])
+            self.index_action_map = np.eye(4)  # np.array([
+            #     [0., 1.],
+            # ])
         else:
             self.index_action_map = index_action_map
 
