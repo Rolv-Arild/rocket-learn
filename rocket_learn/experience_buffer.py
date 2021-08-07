@@ -31,7 +31,7 @@ class ExperienceBuffer:
         self.actions.append(action)
         self.rewards.append(reward)
         self.dones.append(done)
-        self.log_prob.append(log_prob)
+        self.log_prob.append(log_prob) # ** CPU **
 
     def clear(self):
         self.observations = []
