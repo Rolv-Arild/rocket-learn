@@ -39,7 +39,7 @@ def generate_episode(env: Gym, agents: List[BaseAgent]) -> List[ExperienceBuffer
 
         old_obs = observations
         ex = env.action_space.sample()
-        cleanedAction = int(all_actions[0].item())
+        cleanedAction = int(all_actions[0])
         observations, rewards, done, info = env.step(cleanedAction)
 
 
