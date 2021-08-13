@@ -43,8 +43,7 @@ class PPO:
         self.gamma = gamma
         assert n_steps % batch_size == 0
         self.n_steps = n_steps
-        self.lmbda = 1.
-        self.gae_lambda = 0
+        self.gae_lambda = .9
         self.batch_size = batch_size
         self.clip_range = .2
         self.ent_coef = 0.01
