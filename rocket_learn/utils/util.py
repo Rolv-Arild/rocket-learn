@@ -18,7 +18,7 @@ def generate_episode(env: Gym, agents: List[BaseAgent]) -> List[ExperienceBuffer
         ExperienceBuffer()
         for _ in range(len(agents))
     ]
-
+    ep_rews = [0 for _ in range(len(agents))]
     with torch.no_grad():
         while not done:
             # TODO we need either:
@@ -53,6 +53,10 @@ def generate_episode(env: Gym, agents: List[BaseAgent]) -> List[ExperienceBuffer
             # Might be different if only one agent?
             for exp_buf, obs, act, rew, log_prob in zip(rollouts, old_obs, all_indices, rewards, all_log_probs):
                 exp_buf.add_step(obs, act, rew, done, log_prob)
+              
+            for i in range(len(agents)):
+                ep_rews[i] += rewards[i]
+    print(ep_rews)
 
     return rollouts
 
