@@ -42,7 +42,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             rollout = self.redis.lpop(ROLLOUTS)
             if rollout is not None:  # Assuming nil is converted to None by py-redis
                 yield pickle.loads(rollout)
-            time.sleep(1)  # Don't DOS Redis
+            else:
+                time.sleep(1)  # Don't DOS Redis
 
     def _update_model(self, agent, version):  # TODO same as update_parameters?
         if self.redis.exists(MODEL_ACTOR_LATEST) > 0:
