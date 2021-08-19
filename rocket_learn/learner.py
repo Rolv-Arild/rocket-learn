@@ -56,9 +56,11 @@ class PPO:
         ])
 
     def run(self):
+        epoch = 0
         rollout_gen = self.rollout_generator.generate_rollouts()
 
         while True:
+            print("Epoch:",epoch)
             self.rollout_generator.update_parameters([self.agent.actor.state_dict(),
                                                       self.agent.critic.state_dict()])
             rollouts = []
@@ -72,6 +74,7 @@ class PPO:
                     return
 
             self.calculate(rollouts)
+            epoch += 1
 
     def set_logger(self, logger):
         self.logger = logger
