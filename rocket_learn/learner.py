@@ -33,8 +33,26 @@ class CloudpickleWrapper:
 
 # this should probably be in its own file
 class PPO:
+    """
+        Proximal Policy Optimization algorithm (PPO)
+
+        :param rollout_generator: Function that will generate the rollouts
+        :param actor: Torch actor network
+        :param critic: Torch critic network
+        :param n_steps: The number of steps to run per update
+        :param lr_actor: Actor optimizer learning rate (Adam)
+        :param lr_critic: Critic optimizer learning rate (Adam)
+        :param gamma: Discount factor
+        :param batch_size: Minibatch size
+        :param epochs: Number of epoch when optimizing the loss
+        :param clip_range: Clipping parameter for the value function
+        :param ent_coef: Entropy coefficient for the loss calculation
+        :param gae_lambda: Factor for trade-off of bias vs variance for Generalized Advantage Estimator
+        :param vf_coef: Value function coefficient for the loss calculation
+    """
     def __init__(self, rollout_generator: BaseRolloutGenerator, actor, critic, n_steps=4096, lr_actor=3e-4,
-                 lr_critic=3e-4, gamma=0.99, batch_size=512, epochs=10):
+                 lr_critic=3e-4, gamma=0.99, batch_size=512, epochs=10, clip_range=0.2, ent_coef=0.01,
+                 gae_lambda=0, vf_coef=1):
         self.rollout_generator = rollout_generator
         self.agent = PPOAgent(actor, critic)  # TODO let users choose their own agent
 
@@ -43,19 +61,23 @@ class PPO:
         self.gamma = gamma
         assert n_steps % batch_size == 0
         self.n_steps = n_steps
-        self.lmbda = 1.
-        self.gae_lambda = 0
+        self.gae_lambda = gae_lambda
         self.batch_size = batch_size
-        self.clip_range = .2
-        self.ent_coef = 0.01
-        self.vf_coef = 1
+        self.clip_range = clip_range
+        self.ent_coef = ent_coef
+        self.vf_coef = vf_coef
         self.max_grad_norm = None
+
+        # **TODO** allow different optimizer types
         self.optimizer = torch.optim.Adam([
             {'params': self.agent.actor.parameters(), 'lr': lr_actor},
             {'params': self.agent.critic.parameters(), 'lr': lr_critic}
         ])
 
     def run(self):
+        """
+        Generate rollout data and train
+        """
         epoch = 0
         rollout_gen = self.rollout_generator.generate_rollouts()
 
@@ -80,35 +102,16 @@ class PPO:
         self.logger = logger
 
     def policy_dict_list(self):
+        """
+        Get actor and critic state dictionaries as a list
+        """
         networks = [self.agent.actor.get_state_dict(), self.agent.critic.get_state_dict()]
         return networks
 
-    # def evaluate_actions(self, observations, actions):
-    #     dists = self.agent.get_action_distribution(observations)
-    #     indices = self.agent.get_action_indices(dists)
-    #
-    #     # Thanks Rangler!
-    #     new_raw_a_logits = self.agent.forward_actor(observations)
-    #
-    #     new_raw_a_probs = [F.softmax(a_logit, dim=-1) for a_logit in new_raw_a_logits]
-    #
-    #     new_cat_a_probs = th.cat(
-    #         (new_raw_a_probs[0], new_raw_a_probs[1], new_raw_a_probs[2], new_raw_a_probs[3], new_raw_a_probs[4]), 1)
-    #     new_cat_probs = new_cat_a_probs.gather(1, actions[:, :5])
-    #
-    #     new_ber_a_probs = th.cat((new_raw_a_probs[5], new_raw_a_probs[6], new_raw_a_probs[7]), 1)
-    #     new_ber_probs = new_ber_a_probs.gather(1, actions[:, 5:])
-    #
-    #     log_prob = torch.cat([new_cat_probs, new_ber_probs], dim=1)
-    #     log_prob = log_prob.sum(dim=1)
-    #
-    #     cat_entropy = torch.sum(new_cat_a_probs * torch.log(new_cat_a_probs + 1e-10), dim=(0, 1))
-    #     ber_entropy = torch.sum(new_ber_a_probs * torch.log(new_ber_a_probs + 1e-10), dim=(0, 1))
-    #     entropy = -torch.mean(cat_entropy + ber_entropy)
-    #
-    #     return log_prob, entropy
-
     def evaluate_actions(self, observations, actions):
+        """
+        Calculate Log Probability and Entropy of actions
+        """
         dists = self.agent.get_action_distribution(observations)
         # indices = self.agent.get_action_indices(dists)
 
@@ -120,28 +123,10 @@ class PPO:
         entropy = -torch.mean(entropy)
         return log_prob, entropy
 
-        # # Thanks Rangler!
-        # new_raw_a_logits = self.agent.forward_actor(observations)
-        #
-        # new_raw_a_probs = [F.softmax(a_logit, dim=-1) for a_logit in new_raw_a_logits]
-        #
-        # new_cat_a_probs = new_raw_a_probs[0]
-        # new_cat_probs = new_cat_a_probs.gather(1, actions)
-        #
-        # # new_ber_a_probs = th.stack(dists[5:])
-        # #ew_ber_a_probs = th.cat((new_raw_a_probs[5], new_raw_a_probs[6], new_raw_a_probs[7]), 1)
-        # #new_ber_probs = new_ber_a_probs.gather(1, actions[:, 5:])
-        #
-        # log_prob = new_cat_probs
-        # log_prob = log_prob.sum(dim=1)
-        #
-        # cat_entropy = torch.sum(new_cat_a_probs * torch.log(new_cat_a_probs + 1e-10), dim=(0, 1))
-        # #ber_entropy = torch.sum(new_ber_a_probs * torch.log(new_ber_a_probs + 1e-10), dim=(0, 1))
-        # entropy = -torch.mean(cat_entropy)
-        #
-        # return log_prob, entropy
-
     def calculate(self, buffers: List[ExperienceBuffer]):
+        """
+        Calculate loss and update network
+        """
         obs_tensors = []
         act_tensors = []
         # value_tensors = []
@@ -156,20 +141,15 @@ class PPO:
             obs_tensor = th.as_tensor(np.stack(buffer.observations)).float()
             act_tensor = th.as_tensor(np.stack(buffer.actions))
             log_prob_tensor = th.as_tensor(buffer.log_prob)
-            rew_tensor = th.as_tensor(buffer.rewards)  # TODO discounted rewards (returns? not in python preferably)
+            rew_tensor = th.as_tensor(buffer.rewards)
             done_tensor = th.as_tensor(buffer.dones)
 
-            log_prob_tensor.detach_()  # sb3 is detaching this?
+            log_prob_tensor.detach_()
 
-            # **sb3 version if we want it**
             size = rew_tensor.size()[0]
             advantages = th.zeros((size,), dtype=th.float)
             v_targets = th.zeros((size,), dtype=th.float)
 
-            # dones shifted right by 1 and then 1 at the very beginning
-            # episode_starts = np.roll(done_tensor, 1)
-            # episode_starts[0] = True
-            # episode_starts = th.as_tensor(episode_starts)
             episode_starts = th.roll(done_tensor, 1)
             episode_starts[0] = 1.
 
@@ -191,27 +171,22 @@ class PPO:
                     v_targets[step] = v_target
 
             returns = advantages + values
-
             advantages = (advantages - th.mean(advantages)) / (th.std(advantages) + 1e-8)
-            # advantages.detach_()
+
 
             obs_tensors.append(obs_tensor)
             act_tensors.append(act_tensor)
-            # value_tensors.append(values)
             log_prob_tensors.append(log_prob_tensor)
             advantage_tensors.append(advantages)
             returns_tensors.append(returns)
             v_target_tensors.append(v_targets)
-
             rewards_tensors.append(rew_tensor)
 
         obs_tensor = th.cat(obs_tensors).float()
         act_tensor = th.cat(act_tensors)
-        # value_tensor = th.cat(value_tensors)
         log_prob_tensor = th.cat(log_prob_tensors).float()
         advantages_tensor = th.cat(advantage_tensors)
         returns_tensor = th.cat(returns_tensors)
-        # v_targets_tensor = th.cat(v_target_tensors)
 
         rewards_tensor = th.cat(rewards_tensors)
         print(th.mean(rewards_tensor).item())
@@ -223,10 +198,8 @@ class PPO:
         log_prob_tensor = log_prob_tensor[indices]
         advantages = advantages_tensor[indices]
         returns = returns_tensor[indices]
-        # values = values[indices]
-        # v_targets = v_targets_tensor[indices]
 
-        for e in range(self.epochs):  # Reshuffle every epoch?
+        for e in range(self.epochs):
             # this is mostly pulled from sb3
             for i in range(0, self.n_steps, self.batch_size):
                 # Note: Will cut off final few samples
@@ -235,7 +208,6 @@ class PPO:
                 act = act_tensor[i: i + self.batch_size]
                 adv = advantages[i:i + self.batch_size]
                 ret = returns[i: i + self.batch_size]
-                # target = v_targets[i: i + self.batch_size]
 
                 old_log_prob = log_prob_tensor[i: i + self.batch_size]
 
@@ -268,4 +240,13 @@ class PPO:
                     nn.utils.clip_grad_norm_(self.agent.actor.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
-                # self.logger write here to log results
+                # *** self.logger write here to log results ***
+                # loss
+                # policy loss
+                # entropy loss
+                # value loss
+
+                # average rewards
+                # average episode length
+
+                # hyper parameter logging or JSON info

@@ -11,6 +11,9 @@ from rocket_learn.agent import BaseAgent
 
 
 def generate_episode(env: Gym, agents: List[BaseAgent]) -> List[ExperienceBuffer]:
+    """
+    create experience buffer data by interacting with the environment(s)
+    """
     observations = env.reset()
     done = False
 
@@ -21,14 +24,6 @@ def generate_episode(env: Gym, agents: List[BaseAgent]) -> List[ExperienceBuffer
     ep_rews = [0 for _ in range(len(agents))]
     with torch.no_grad():
         while not done:
-            # TODO we need either:
-            # - torch.distributions.Distribution
-            # - (selected_action, <log_>prob) tuple
-            # - logits for actions, 3*5+2*3=21 outputs
-            # to calculate log_prob
-            # SOREN COMMENT:
-            # Aren't we leaving that to the agents?
-
             all_indices = []
             all_actions = []
             all_log_probs = []
