@@ -26,9 +26,9 @@ OP_MODELS = "opponent_models"
 
 
 class RedisRolloutGenerator(BaseRolloutGenerator):
-    def __init__(self, save_every=10):
+    def __init__(self, host='127.0.0.1', save_every=10):
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
-        self.redis = Redis(host='127.0.0.1', port=6379, db=0)
+        self.redis = Redis(host=host, port=6379, db=0)
         self.n_updates = 0
         self.save_every = save_every
 
@@ -83,7 +83,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
 
 
 class RedisRolloutWorker:  # Provides RedisRolloutGenerator with rollouts via a Redis server
-    def __init__(self, epic_rl_path, actor, critic, match: Match, current_version_prob=.8):
+    def __init__(self, epic_rl_path, actor, critic, match: Match, current_version_prob=.8, host="127.0.0.1"):
         # example pytorch stuff, delete later
         self.state_dim = 67
         self.action_dim = 8
@@ -95,7 +95,7 @@ class RedisRolloutWorker:  # Provides RedisRolloutGenerator with rollouts via a 
         self.current_version_prob = current_version_prob
 
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
-        self.redis = Redis(host='127.0.0.1', port=6379, db=0)
+        self.redis = Redis(host=host, port=6379, db=0)
         self.match = match
         self.env = Gym(match=self.match, pipe_id=os.getpid(), path_to_rl=epic_rl_path, use_injector=True)
         self.n_agents = self.match.agents
