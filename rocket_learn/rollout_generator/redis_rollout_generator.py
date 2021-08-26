@@ -81,6 +81,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.redis.set(VERSION_LATEST, self.n_updates)
         
         # TODO Idea: workers send name to identify who contributed rollouts, keep track of top rollout contributors (each param update and total)
+        # Also UID to keep track of current number of contributing workers?
         
         if self.n_updates % self.save_every == 0:
             # self.redis.set(MODEL_N.format(self.n_updates // self.save_every), model_bytes)
