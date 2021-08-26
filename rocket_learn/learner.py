@@ -54,7 +54,10 @@ class PPO:
                  lr_critic=3e-4, gamma=0.99, batch_size=512, epochs=10, clip_range=0.2, ent_coef=0.01,
                  gae_lambda=0, vf_coef=1):
         self.rollout_generator = rollout_generator
-        self.agent = PPOAgent(actor, critic)  # TODO let users choose their own agent
+        
+        # TODO let users choose their own agent
+        # TODO move agent to rollout generator
+        self.agent = PPOAgent(actor, critic)
 
         # hyperparameters
         self.epochs = epochs
