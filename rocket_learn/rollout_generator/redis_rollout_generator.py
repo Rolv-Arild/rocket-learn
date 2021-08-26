@@ -31,7 +31,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.redis = Redis(host=host, port=6379, db=0)
         self.n_updates = 0
         self.save_every = save_every
-
+        
         # TODO saving/loading
         for key in QUALITIES, MODEL_LATEST, ROLLOUTS, VERSION_LATEST, OP_MODELS:
             if self.redis.exists(key) > 0:
@@ -87,7 +87,8 @@ class RedisRolloutWorker:  # Provides RedisRolloutGenerator with rollouts via a 
         # example pytorch stuff, delete later
         self.state_dim = 67
         self.action_dim = 8
-
+        
+        # TODO put model into redis at start in RedisRolloutWorker, and send whole model or config+params so workers can recreate just from redis conn
         self.actor = actor
         self.critic = critic
 
