@@ -6,6 +6,7 @@ import torch
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.tensorboard import SummaryWriter
 
 from rocket_learn.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
@@ -39,6 +40,7 @@ class PPO:
         :param rollout_generator: Function that will generate the rollouts
         :param actor: Torch actor network
         :param critic: Torch critic network
+        :param log_dir: directory to log results at
         :param n_steps: The number of steps to run per update
         :param lr_actor: Actor optimizer learning rate (Adam)
         :param lr_critic: Critic optimizer learning rate (Adam)
@@ -50,7 +52,7 @@ class PPO:
         :param gae_lambda: Factor for trade-off of bias vs variance for Generalized Advantage Estimator
         :param vf_coef: Value function coefficient for the loss calculation
     """
-    def __init__(self, rollout_generator: BaseRolloutGenerator, actor, critic, n_steps=4096, lr_actor=3e-4,
+    def __init__(self, rollout_generator: BaseRolloutGenerator, actor, critic, log_dir, n_steps=4096, lr_actor=3e-4,
                  lr_critic=3e-4, gamma=0.99, batch_size=512, epochs=10, clip_range=0.2, ent_coef=0.01,
                  gae_lambda=0, vf_coef=1):
         self.rollout_generator = rollout_generator
@@ -74,6 +76,8 @@ class PPO:
             {'params': self.agent.critic.parameters(), 'lr': lr_critic}
         ])
 
+        self.writer = SummaryWriter(log_dir)
+
     def run(self):
         """
         Generate rollout data and train
@@ -95,7 +99,7 @@ class PPO:
                 except StopIteration:
                     return
 
-            self.calculate(rollouts)
+            self.calculate(rollouts, epoch)
             epoch += 1
 
     def set_logger(self, logger):
@@ -113,7 +117,6 @@ class PPO:
         Calculate Log Probability and Entropy of actions
         """
         dists = self.agent.get_action_distribution(observations)
-        # indices = self.agent.get_action_indices(dists)
 
         log_prob = th.stack(
             [dist.log_prob(action) for dist, action in zip(dists, th.unbind(actions, dim=1))], dim=1
@@ -123,7 +126,7 @@ class PPO:
         entropy = -torch.mean(entropy)
         return log_prob, entropy
 
-    def calculate(self, buffers: List[ExperienceBuffer]):
+    def calculate(self, buffers: List[ExperienceBuffer], epoch):
         """
         Calculate loss and update network
         """
@@ -240,13 +243,19 @@ class PPO:
                     nn.utils.clip_grad_norm_(self.agent.actor.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
+
+
                 # *** self.logger write here to log results ***
-                # loss
-                # policy loss
-                # entropy loss
-                # value loss
+                self.writer.add_scalar('loss', loss.item(), epoch)
+                self.writer.add_scalar('policy_loss', policy_loss.item(), epoch)
+                self.writer.add_scalar('entropy_loss', entropy_loss.item(), epoch)
+                self.writer.add_scalar('value_loss', value_loss.item(), epoch)
+                self.writer.add_scalar('log_prob', log_prob.item(), epoch)
+                self.writer.add_scalar('entropy', entropy.item(), epoch)
 
                 # average rewards
                 # average episode length
+                #self.writer.add_scalar('avg_eps_len', th.mean(rewards_tensor).item(), epoch)
+                self.writer.add_scalar('avg_reward', th.mean(rewards_tensor).item(), epoch)
 
                 # hyper parameter logging or JSON info
