@@ -3,12 +3,14 @@ import os
 import pickle
 import time
 from typing import Generator, Iterator
+from uuid import uuid4
 
 import numpy as np
 from redis import Redis
 from torch import nn
 
 from rlgym.envs import Match
+from rlgym.gamelaunch import LaunchPreference
 from rlgym.gym import Gym
 from rocket_learn.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
@@ -22,7 +24,9 @@ QUALITIES = "qualities"
 MODEL_LATEST = "model-latest"
 ROLLOUTS = "rollout"
 VERSION_LATEST = "model-version"
-OP_MODELS = "opponent_models"
+OPPONENT_MODELS = "opponent-models"
+WORKER_IDS = "worker-ids"
+LEADERBOARD = "leaderboard"
 
 
 class RedisRolloutGenerator(BaseRolloutGenerator):
@@ -33,7 +37,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.save_every = save_every
         
         # TODO saving/loading
-        for key in QUALITIES, MODEL_LATEST, ROLLOUTS, VERSION_LATEST, OP_MODELS:
+        for key in QUALITIES, MODEL_LATEST, ROLLOUTS, VERSION_LATEST, OPPONENT_MODELS:
             if self.redis.exists(key) > 0:
                 self.redis.delete(key)
 
@@ -48,25 +52,9 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             else:
                 time.sleep(1)  # Don't DOS Redis
 
-    def _update_model(self, agent, version):  # TODO same as update_parameters?
-        if self.redis.exists(MODEL_ACTOR_LATEST) > 0:
-            self.redis.delete(MODEL_ACTOR_LATEST)
-        if self.redis.exists(MODEL_CRITIC_LATEST) > 0:
-            self.redis.delete(MODEL_CRITIC_LATEST)
-        if self.redis.exists(VERSION_LATEST) > 0:
-            self.redis.delete(VERSION_LATEST)
-
-        actor_bytes = pickle.dumps(agent.actor.state_dict())
-        critic_bytes = pickle.dumps(agent.critic.state_dict())
-
-        self.redis.set(MODEL_ACTOR_LATEST, actor_bytes)
-        self.redis.set(MODEL_CRITIC_LATEST, critic_bytes)
-        self.redis.set(VERSION_LATEST, version)
-        print("done setting")
-
     def _add_opponent(self, state_dict_dump):  # TODO use
         # Add to list
-        self.redis.rpush(OP_MODELS, state_dict_dump)
+        self.redis.rpush(OPPONENT_MODELS, state_dict_dump)
         # Set quality
         qualities = [float(v) for v in self.redis.lrange(QUALITIES, 0, -1)]
         if qualities:
@@ -90,7 +78,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
 
 
 class RedisRolloutWorker:  # Provides RedisRolloutGenerator with rollouts via a Redis server
-    def __init__(self, epic_rl_path, actor, critic, match: Match, current_version_prob=.8, host="127.0.0.1"):
+    def __init__(self, name: str, actor, critic, match: Match, current_version_prob=.8, host="127.0.0.1"):
         # example pytorch stuff, delete later
         self.state_dim = 67
         self.action_dim = 8
@@ -99,14 +87,19 @@ class RedisRolloutWorker:  # Provides RedisRolloutGenerator with rollouts via a 
         # and send whole pickled model or config+params so workers can recreate just from redis connection
         self.actor = actor
         self.critic = critic
+        self.name = name
 
         self.current_agent = PPOAgent(actor, critic)
         self.current_version_prob = current_version_prob
 
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.redis = Redis(host=host, port=6379, db=0)
+        self.uuid = str(uuid4())
+        self.redis.rpush(WORKER_IDS, self.uuid)
+        print("Started worker", self.uuid, "on host", host, "under name", name)  # TODO log instead
         self.match = match
-        self.env = Gym(match=self.match, pipe_id=os.getpid(), path_to_rl=epic_rl_path, use_injector=True)
+        self.env = Gym(match=self.match, pipe_id=os.getpid(), launch_preference=LaunchPreference.EPIC_LOGIN_TRICK,
+                       use_injector=True)
         self.n_agents = self.match.agents
 
     def _get_opponent_index(self):
@@ -162,8 +155,8 @@ class RedisRolloutWorker:  # Provides RedisRolloutGenerator with rollouts via a 
                     is_current = np.random.random() < adjusted_prob
                     if not is_current:
                         index, prob = self._get_opponent_index()
-                        version = OP_MODELS
-                        actor_dict, critic_dict = pickle.loads(self.redis.lindex(OP_MODELS, index))
+                        version = OPPONENT_MODELS
+                        actor_dict, critic_dict = pickle.loads(self.redis.lindex(OPPONENT_MODELS, index))
                         selected_agent = PPOAgent(copy.deepcopy(self.actor), copy.deepcopy(self.critic))
                         selected_agent.actor.load_state_dict(actor_dict)
                         selected_agent.critic.load_state_dict(critic_dict)
@@ -179,3 +172,4 @@ class RedisRolloutWorker:  # Provides RedisRolloutGenerator with rollouts via a 
             rollouts = util.generate_episode(self.env, [agent for agent, version, prob in agents])
             
             self.redis.rpush(ROLLOUTS, *(pickle.dumps(rollout) for rollout in rollouts))
+            self.redis.rpush(LEADERBOARD, self.name)
