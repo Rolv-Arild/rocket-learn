@@ -3,6 +3,7 @@ RLGym training tool
 
 ## TODO
 - Add logging (tensorboard only is fine initially)
+  - Give both PPO and RolloutGenerator access
 - Add reward normalization (and distribution?)
 - Model freedom
   - Allow shared layers (ex.: `PPOAgent(shared, actor, critic)`)
