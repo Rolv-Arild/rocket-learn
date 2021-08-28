@@ -51,7 +51,6 @@ def generate_episode(env: Gym, agents: List[BaseAgent]) -> List[ExperienceBuffer
               
             for i in range(len(agents)):
                 ep_rews[i] += rewards[i]
-    print(ep_rews)
 
     return rollouts
 

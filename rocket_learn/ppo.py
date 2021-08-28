@@ -1,15 +1,18 @@
 import io
+import os
 from typing import List, Optional
 
 import numpy as np
 import torch
 import torch as th
-from torch import nn as nn, nn
+from torch import nn
 from torch.nn import functional as F, Identity
 
 from rocket_learn.agent import BaseAgent
 from rocket_learn.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
+
+import wandb
 
 
 class PPOAgent(BaseAgent):
@@ -70,12 +73,14 @@ class PPO:
 
     def __init__(self, rollout_generator: BaseRolloutGenerator, agent: PPOAgent, n_steps=4096, lr_actor=3e-4,
                  lr_critic=3e-4, lr_shared=3e-4, gamma=0.99, batch_size=512, epochs=10, clip_range=0.2, ent_coef=0.01,
-                 gae_lambda=0.95, vf_coef=1):
+                 gae_lambda=0.95, vf_coef=1, logger=None):
         self.rollout_generator = rollout_generator
 
         # TODO let users choose their own agent
         # TODO move agent to rollout generator
         self.agent = agent
+
+        self.logger = logger
 
         # hyperparameters
         self.epochs = epochs
@@ -88,6 +93,8 @@ class PPO:
         self.ent_coef = ent_coef
         self.vf_coef = vf_coef
         self.max_grad_norm = None
+
+        self.logger.watch([self.agent.actor, self.agent.critic, self.agent.shared])
 
         # **TODO** allow different optimizer types
         self.optimizer = torch.optim.Adam([
@@ -104,7 +111,6 @@ class PPO:
         rollout_gen = self.rollout_generator.generate_rollouts()
 
         while True:
-            print("Epoch:", epoch)
             self.rollout_generator.update_parameters(self.agent)
 
             rollouts = []
@@ -152,6 +158,9 @@ class PPO:
 
         rewards_tensors = []
 
+        tot_ep_reward = 0
+        tot_ep_steps = 0
+        n = 0
         for buffer in buffers:  # Do discounts for each ExperienceBuffer individually
             obs_tensor = th.as_tensor(np.stack(buffer.observations)).float()
             act_tensor = th.as_tensor(np.stack(buffer.actions))
@@ -195,6 +204,13 @@ class PPO:
             returns_tensors.append(returns)
             v_target_tensors.append(v_targets)
             rewards_tensors.append(rew_tensor)
+            tot_ep_reward += rew_tensor.sum()
+            tot_ep_steps += size
+            n += 1
+        self.logger.log({
+            "mean_ep_reward": tot_ep_reward / n,
+            "mean_ep_len": tot_ep_steps / n
+        })
 
         obs_tensor = th.cat(obs_tensors).float()
         act_tensor = th.cat(act_tensors)
@@ -202,8 +218,8 @@ class PPO:
         advantages_tensor = th.cat(advantage_tensors)
         returns_tensor = th.cat(returns_tensors)
 
-        rewards_tensor = th.cat(rewards_tensors)
-        print(th.mean(rewards_tensor).item())
+        # rewards_tensor = th.cat(rewards_tensors)
+        # print(th.mean(rewards_tensor).item())
 
         # shuffle data
         indices = torch.randperm(advantages_tensor.shape[0])[:self.n_steps]
@@ -212,6 +228,12 @@ class PPO:
         log_prob_tensor = log_prob_tensor[indices]
         advantages = advantages_tensor[indices]
         returns = returns_tensor[indices]
+
+        tot_loss = 0
+        tot_policy_loss = 0
+        tot_entropy_loss = 0
+        tot_value_loss = 0
+        n = 0
 
         for e in range(self.epochs):
             # this is mostly pulled from sb3
@@ -256,6 +278,12 @@ class PPO:
                 self.optimizer.step()
 
                 # *** self.logger write here to log results ***
+                tot_loss += loss
+                tot_policy_loss += policy_loss
+                tot_entropy_loss += entropy_loss
+                tot_value_loss += value_loss
+                n += 1
+
                 # loss
                 # policy loss
                 # entropy loss
@@ -265,3 +293,11 @@ class PPO:
                 # average episode length
 
                 # hyper parameter logging or JSON info
+        self.logger.log(
+            {
+                "loss": tot_loss / n,
+                "policy_loss": tot_policy_loss / n,
+                "entropy_loss": tot_entropy_loss / n,
+                "value_loss": tot_value_loss / n,
+            },
+        )

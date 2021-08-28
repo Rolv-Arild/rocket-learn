@@ -5,6 +5,7 @@ from typing import Iterator
 from uuid import uuid4
 
 import numpy as np
+import wandb
 from redis import Redis
 
 from rlgym.envs import Match
@@ -35,11 +36,13 @@ def _unserialize(obj):
 
 
 class RedisRolloutGenerator(BaseRolloutGenerator):
-    def __init__(self, save_every=10, **redis_kwargs):
+    def __init__(self, save_every=10, logger=None, **redis_kwargs):
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.redis = Redis(**redis_kwargs)
         self.n_updates = 0
         self.save_every = save_every
+
+        self.logger = logger
 
         # TODO saving/loading
         for key in _ALL:
@@ -62,6 +65,10 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         # Set quality
         qualities = [float(v) for v in self.redis.lrange(QUALITIES, 0, -1)]
         if qualities:
+            self.logger.log({
+                "qualities": wandb.plot.line_series(np.arange(len(qualities)), [softmax(np.array(qualities))],
+                                                    ["quality"], "Qualities", "version")
+            })
             quality = max(qualities)
         else:
             quality = 0.
