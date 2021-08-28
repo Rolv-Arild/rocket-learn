@@ -59,7 +59,7 @@ actor = nn.Sequential(
 
 if __name__ == '__main__':
     # rollout_gen = SimpleRolloutGenerator(None, **get_match_args())
-    rollout_gen = RedisRolloutGenerator()
+    rollout_gen = RedisRolloutGenerator(password="rocket-learn")
 
     agent = PPOAgent(actor, critic, shared)
     alg = PPO(rollout_gen, agent, n_steps=5000, batch_size=500, lr_critic=3e-4, lr_actor=3e-4, epochs=10)

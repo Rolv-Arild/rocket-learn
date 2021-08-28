@@ -35,9 +35,9 @@ def _unserialize(obj):
 
 
 class RedisRolloutGenerator(BaseRolloutGenerator):
-    def __init__(self, host='127.0.0.1', save_every=10):
+    def __init__(self, save_every=10, **redis_kwargs):
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
-        self.redis = Redis(host=host, port=6379, db=0)
+        self.redis = Redis(**redis_kwargs)
         self.n_updates = 0
         self.save_every = save_every
 
@@ -84,9 +84,9 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
 
 
 class RedisRolloutWorker:  # Provides RedisRolloutGenerator with rollouts via a Redis server
-    def __init__(self, name: str, match: Match, current_version_prob=.8, host="127.0.0.1"):
+    def __init__(self, name: str, match: Match, current_version_prob=.8, **redis_kwargs):
         # TODO model or config+params so workers can recreate just from redis connection?
-        self.redis = Redis(host=host, port=6379, db=0)
+        self.redis = Redis(**redis_kwargs)
 
         self.name = name
 
@@ -96,7 +96,8 @@ class RedisRolloutWorker:  # Provides RedisRolloutGenerator with rollouts via a 
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.uuid = str(uuid4())
         self.redis.rpush(WORKER_IDS, self.uuid)
-        print("Started worker", self.uuid, "on host", host, "under name", name)  # TODO log instead
+        print("Started worker", self.uuid, "on host", self.redis.connection_pool.connection_kwargs.get("host"),
+              "under name", name)  # TODO log instead
         self.match = match
         self.env = Gym(match=self.match, pipe_id=os.getpid(), launch_preference=LaunchPreference.EPIC_LOGIN_TRICK,
                        use_injector=True)

@@ -70,7 +70,7 @@ class PPO:
 
     def __init__(self, rollout_generator: BaseRolloutGenerator, agent: PPOAgent, n_steps=4096, lr_actor=3e-4,
                  lr_critic=3e-4, lr_shared=3e-4, gamma=0.99, batch_size=512, epochs=10, clip_range=0.2, ent_coef=0.01,
-                 gae_lambda=0, vf_coef=1):
+                 gae_lambda=0.95, vf_coef=1):
         self.rollout_generator = rollout_generator
 
         # TODO let users choose their own agent
