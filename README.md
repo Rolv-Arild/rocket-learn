@@ -11,6 +11,9 @@ RLGym training tool
 - Redis features 
   - Full setup (architecture, params, config?) communicated via redis, can start worker with only IP
   - Version quality is most important measurement, need to log it ✔
+  - Implement quality update
+    - How to account for mix of agents in a single team? TrueSkill would probably be better
+    - Should workers be the ones updating?
 - Long-term plan is to set up a stream and let (at least some) people contribute with rollouts
   - Keep track of who is contributing ✔, make on-screen leaderboards
   - Exact setup should probably be in different repo
