@@ -6,6 +6,7 @@ RLGym training tool
   - Give both PPO and RolloutGenerator access ✔
 - Add reward normalization (and distribution?)
 - Model freedom
+  - Multiple inputs
   - Allow shared layers (ex.: `PPOAgent(shared, actor, critic)`) ✔
   - Continuous actions if we really want
 - Redis features 
