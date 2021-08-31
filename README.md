@@ -8,6 +8,7 @@ RLGym training tool
 - Model freedom
   - Multiple inputs
   - Allow shared layers (ex.: `PPOAgent(shared, actor, critic)`) ✔
+  - Recurrent?
   - Continuous actions if we really want
 - Redis features 
   - Full setup (architecture, params, config?) communicated via redis, can start worker with only IP
