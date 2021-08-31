@@ -81,7 +81,7 @@ class SeriousObsBuilder(ObsBuilder):
         q = qkv[[main_n], :]
         kv = np.delete(qkv, main_n, axis=0)  # Delete main?
         # kv = qkv
-        kv[:, 4:10] -= q[4:10]  # Pos and vel are relative
+        kv[:, 5:10] -= q[5:10]  # Pos and vel are relative
         return q, kv, mask
 
 
