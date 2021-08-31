@@ -1,5 +1,6 @@
 import io
 import os
+import time
 from typing import List, Optional
 
 import numpy as np
@@ -73,7 +74,7 @@ class PPO:
 
     def __init__(self, rollout_generator: BaseRolloutGenerator, agent: PPOAgent, n_steps=4096, lr_actor=3e-4,
                  lr_critic=3e-4, lr_shared=3e-4, gamma=0.99, batch_size=512, epochs=10, clip_range=0.2, ent_coef=0.01,
-                 gae_lambda=0.95, vf_coef=1, logger=None):
+                 gae_lambda=0.95, vf_coef=1, max_grad_norm=0.5, logger=None):
         self.rollout_generator = rollout_generator
 
         # TODO let users choose their own agent
@@ -92,7 +93,7 @@ class PPO:
         self.clip_range = clip_range
         self.ent_coef = ent_coef
         self.vf_coef = vf_coef
-        self.max_grad_norm = None
+        self.max_grad_norm = max_grad_norm
 
         self.logger.watch([self.agent.actor, self.agent.critic, self.agent.shared])
 
@@ -111,6 +112,7 @@ class PPO:
         rollout_gen = self.rollout_generator.generate_rollouts()
 
         while True:
+            t0 = time.time()
             self.rollout_generator.update_parameters(self.agent)
 
             rollouts = []
@@ -125,6 +127,8 @@ class PPO:
 
             self.calculate(rollouts)
             epoch += 1
+            t1 = time.time()
+            self.logger.log({"fps": size / (t1 - t0)})
 
     def set_logger(self, logger):
         self.logger = logger
@@ -158,8 +162,8 @@ class PPO:
 
         rewards_tensors = []
 
-        tot_ep_reward = 0
-        tot_ep_steps = 0
+        ep_rewards = np.zeros(len(buffers))
+        ep_steps = np.zeros(len(buffers))
         n = 0
         for buffer in buffers:  # Do discounts for each ExperienceBuffer individually
             obs_tensor = th.as_tensor(np.stack(buffer.observations)).float()
@@ -204,13 +208,15 @@ class PPO:
             returns_tensors.append(returns)
             v_target_tensors.append(v_targets)
             rewards_tensors.append(rew_tensor)
-            tot_ep_reward += rew_tensor.sum()
-            tot_ep_steps += size
+
+            ep_rewards[n] = rew_tensor.sum()
+            ep_steps[n] = size
             n += 1
         self.logger.log({
-            "mean_ep_reward": tot_ep_reward / n,
-            "mean_ep_len": tot_ep_steps / n
-        })
+            "ep_reward_mean": ep_rewards.mean(),
+            "ep_reward_std": ep_rewards.std(),
+            "ep_len_mean": ep_steps.mean(),
+        }, commit=False)
 
         obs_tensor = th.cat(obs_tensors).float()
         act_tensor = th.cat(act_tensors)
