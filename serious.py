@@ -39,63 +39,49 @@ class SeriousObsBuilder(ObsBuilder):
         # Lots of room for optimization
         invert = player.team_num == ORANGE_TEAM
 
-        car_data = player.inverted_car_data if invert else player.car_data
-        q = np.zeros(32)
-        q[0] = 1  # is_main
-        # q[1] = 0  # is_teammate
-        # q[2] = 0  # is_opponent
-        # q[3] = 0  # is_ball
-        # q[4] = 0  # is_boost
-        q[5:8] = car_data.position
-        q[7:10] = car_data.linear_velocity
-        q[10:13] = car_data.forward()
-        q[13:16] = car_data.up()
-        q[16:19] = car_data.angular_velocity
-        q[20] = player.boost_amount
-        q[21] = player.is_demoed
-        q[22] = player.on_ground
-        q[23] = player.has_flip
-        q[24:] = previous_action
-
-        # Consider including main player as well?
-        kv = np.zeros((1 + self.n_players + len(state.boost_pads), 24))  # Ball, players, boosts
+        qkv = np.zeros((1 + self.n_players + len(state.boost_pads), 24))  # Ball, players, boosts
 
         ball = state.inverted_ball if invert else state.ball
-        kv[0, 3] = 1
-        kv[0, 5:8] = ball.position
-        kv[0, 7:10] = ball.linear_velocity
-        kv[0, 16:19] = ball.angular_velocity
+        qkv[0, 3] = 1  # is_ball
+        qkv[0, 5:8] = ball.position
+        qkv[0, 7:10] = ball.linear_velocity
+        qkv[0, 16:19] = ball.angular_velocity
 
         n = 1
-        for i, other_player in enumerate(state.players):
+        main_n = None
+        for other_player in state.players:
             if other_player == player:
-                continue
+                qkv[n, 0] = 1  # is_main
+                main_n = n
             if other_player.team_num == player.team_num:
-                kv[n, 1] = 1  # is_teammate
+                qkv[n, 1] = 1  # is_teammate
             else:
-                kv[n, 2] = 1  # is_opponent
+                qkv[n, 2] = 1  # is_opponent
             car_data = other_player.inverted_car_data if invert else other_player.car_data
-            kv[n, 5:8] = car_data.position
-            kv[n, 7:10] = car_data.linear_velocity
-            kv[n, 10:13] = car_data.forward()
-            kv[n, 13:16] = car_data.up()
-            kv[n, 16:19] = car_data.angular_velocity
-            kv[n, 20] = other_player.boost_amount
-            kv[n, 21] = other_player.is_demoed  # Add demo timer?
-            kv[n, 22] = other_player.on_ground
-            kv[n, 23] = other_player.has_flip
+            qkv[n, 5:8] = car_data.position
+            qkv[n, 7:10] = car_data.linear_velocity
+            qkv[n, 10:13] = car_data.forward()
+            qkv[n, 13:16] = car_data.up()
+            qkv[n, 16:19] = car_data.angular_velocity
+            qkv[n, 20] = other_player.boost_amount
+            qkv[n, 21] = other_player.is_demoed  # Add demo timer?
+            qkv[n, 22] = other_player.on_ground
+            qkv[n, 23] = other_player.has_flip
             n += 1
 
         boost_pads = state.inverted_boost_pads if invert else state.boost_pads
-        kv[n:, 5:8] = self._boost_locations
-        kv[n:, 20] = 0.12 + 0.88 * (self._boost_locations[2] > 72)  # Boost amount
-        kv[n:, 21] = boost_pads  # Add boost timer?
+        qkv[n:, 4] = 1  # is_boost
+        qkv[n:, 5:8] = self._boost_locations
+        qkv[n:, 20] = 0.12 + 0.88 * (self._boost_locations[2] > 72)  # Boost amount
+        qkv[n:, 21] = boost_pads  # Add boost timer?
 
-        mask = np.zeros(kv.shape[0])
+        mask = np.zeros(qkv.shape[0])
         mask[1 + len(state.players):1 + self.n_players] = 1
 
+        q = qkv[[main_n], :]
+        kv = np.delete(qkv, main_n, axis=0)  # Delete main?
+        # kv = qkv
         kv[:, 4:10] -= q[4:10]  # Pos and vel are relative
-        q = np.expand_dims(q, 0)  # Add extra dim at start for compatibility
         return q, kv, mask
 
 
