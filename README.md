@@ -21,8 +21,4 @@ RLGym training tool
   - Exact setup should probably be in different repo
   - Rolv can keep it running on current PC, planning to get new one
   - Need to come to agreement on config (architecture, reward func, parameters etc.)
-  - Some suggestions (Rolv)
-    - EARLv2 arch (use mix of 1s, 2s and 3s?)
-    - Reward func as simple as possible (EventReward only? Limit touch reward somehow)
-    - Also distribute rewards like OpenAI
-    - 1 mil steps per update, save every 10 updates
+  - See `serious.py` for suggestions
