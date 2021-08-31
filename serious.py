@@ -44,8 +44,8 @@ class SeriousObsBuilder(ObsBuilder):
         ball = state.inverted_ball if invert else state.ball
         qkv[0, 3] = 1  # is_ball
         qkv[0, 5:8] = ball.position
-        qkv[0, 7:10] = ball.linear_velocity
-        qkv[0, 16:19] = ball.angular_velocity
+        qkv[0, 8:11] = ball.linear_velocity
+        qkv[0, 17:20] = ball.angular_velocity
 
         n = 1
         main_n = None
@@ -59,10 +59,10 @@ class SeriousObsBuilder(ObsBuilder):
                 qkv[n, 2] = 1  # is_opponent
             car_data = other_player.inverted_car_data if invert else other_player.car_data
             qkv[n, 5:8] = car_data.position
-            qkv[n, 7:10] = car_data.linear_velocity
-            qkv[n, 10:13] = car_data.forward()
-            qkv[n, 13:16] = car_data.up()
-            qkv[n, 16:19] = car_data.angular_velocity
+            qkv[n, 8:11] = car_data.linear_velocity
+            qkv[n, 11:14] = car_data.forward()
+            qkv[n, 14:17] = car_data.up()
+            qkv[n, 17:20] = car_data.angular_velocity
             qkv[n, 20] = other_player.boost_amount
             qkv[n, 21] = other_player.is_demoed  # Add demo timer?
             qkv[n, 22] = other_player.on_ground
@@ -81,7 +81,7 @@ class SeriousObsBuilder(ObsBuilder):
         q = qkv[[main_n], :]
         kv = np.delete(qkv, main_n, axis=0)  # Delete main?
         # kv = qkv
-        kv[:, 5:10] -= q[5:10]  # Pos and vel are relative
+        kv[:, 5:11] -= q[5:11]  # Pos and vel are relative
         return q, kv, mask
 
 
