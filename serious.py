@@ -92,9 +92,7 @@ class SeriousObsBuilder(ObsBuilder):
         kv[n:, 21] = boost_pads  # Add boost timer?
 
         mask = np.zeros(kv.shape[0])
-        missing_players = self.n_players - len(state.players)
-        assert missing_players > 0
-        mask[-missing_players:] = 1
+        mask[1 + len(state.players):1 + self.n_players] = 1
 
         kv[:, 4:10] -= q[4:10]  # Pos and vel are relative
         q = np.expand_dims(q, 0)  # Add extra dim at start for compatibility
