@@ -80,8 +80,8 @@ class SeriousObsBuilder(ObsBuilder):
 
         q = qkv[[main_n], :]
         q = np.concatenate((q, np.expand_dims(previous_action, axis=0)), axis=1)
-        kv = np.delete(qkv, main_n, axis=0)  # Delete main?
-        # kv = qkv
+        # kv = np.delete(qkv, main_n, axis=0)  # Delete main? Watch masking
+        kv = qkv
         kv[:, 5:11] -= q[:, 5:11]  # Pos and vel are relative
         return q, kv, mask
 
