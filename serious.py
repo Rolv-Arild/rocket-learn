@@ -26,6 +26,9 @@ class SeriousStateSetter(StateSetter):
     # Use anything other than DefaultState?
     raise NotImplementedError
 
+def get_match():
+  return Match(self_play=True, players=random.randint(1, 3))  # Use mix of 1s, 2s and 3s?
+
 if __name__ == "__main__":  
   wandb.login(key=os.environ["WANDB_KEY"])
   logger = wandb.init(project="rocket-learn", entity="rolv-arild")
