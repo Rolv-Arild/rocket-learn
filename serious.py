@@ -147,7 +147,8 @@ if __name__ == "__main__":
     d = 256
     actor = torch.jit.trace(Sequential(Linear(d, d), ControlsPredictorDiscrete(d)), torch.zeros(1, 1, d))
     critic = torch.jit.trace(Sequential(Linear(d, d), Linear(d, 1)), torch.zeros(1, 1, d))
-    shared = torch.jit.trace(EARLPerceiver(d, query_features=32, key_value_features=24), (torch.zeros(1, 1, 32),) * 3)
+    shared = torch.jit.trace(EARLPerceiver(d, query_features=32, key_value_features=24),
+                             (torch.zeros(1, 1, 32), torch.zeros(1, 1, 24), torch.zeros(1, 1, 24)))
 
     agent = PPOAgent(actor=actor, critic=critic, shared=shared)
 
