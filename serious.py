@@ -12,7 +12,7 @@ from torch.nn import Sequential, Linear
 import wandb
 from rlgym.envs import Match
 from rlgym.utils import ObsBuilder, TerminalCondition, RewardFunction, StateSetter
-from rlgym.utils.common_values import ORANGE_TEAM, BOOST_LOCATIONS
+from rlgym.utils.common_values import ORANGE_TEAM, BOOST_LOCATIONS, BLUE_TEAM
 from rlgym.utils.gamestates import PlayerData, GameState
 from rlgym.utils.state_setters import StateWrapper
 from rocket_learn.ppo import PPOAgent, PPO
@@ -21,6 +21,8 @@ from rocket_learn.rollout_generator.redis_rollout_generator import RedisRolloutG
 
 class SeriousObsBuilder(ObsBuilder):
     _boost_locations = np.array(BOOST_LOCATIONS)
+    _invert = np.array([1] * 5 + [-1, -1, 1] * 5 + [1] * 4)
+    _norm = np.array([1.] * 5 + [2300] * 6 + [1] * 6 + [5.5] * 3 + [1] * 4)
 
     def __init__(self, n_players=6, tick_skip=8):
         super().__init__()
@@ -28,61 +30,85 @@ class SeriousObsBuilder(ObsBuilder):
         self.demo_timers = None
         self.boost_timers = None
         self.current_state = None
+        self.current_qkv = None
+        self.current_mask = None
         self.tick_skip = tick_skip
 
-    # With EARLPerceiver we can use relative coords+vel(+more?) for key/value tensor, might be smart
     def reset(self, initial_state: GameState):
         self.demo_timers = np.zeros(len(initial_state.players))
         self.boost_timers = np.zeros(len(initial_state.boost_pads))
 
-    def build_obs(self, player: PlayerData, state: GameState, previous_action: np.ndarray) -> Any:
-        # Lots of room for optimization
-        invert = player.team_num == ORANGE_TEAM
-
+    def update_if_new_state(self, state: GameState):
+        if self.current_state == state:  # No need to update
+            return
         qkv = np.zeros((1 + self.n_players + len(state.boost_pads), 24))  # Ball, players, boosts
-
-        ball = state.inverted_ball if invert else state.ball
+        ball = state.ball
         qkv[0, 3] = 1  # is_ball
         qkv[0, 5:8] = ball.position
         qkv[0, 8:11] = ball.linear_velocity
         qkv[0, 17:20] = ball.angular_velocity
 
+        demos = np.zeros(len(state.players))
         n = 1
-        main_n = None
-        for other_player in state.players:
-            if other_player == player:
-                qkv[n, 0] = 1  # is_main
-                main_n = n
-            if other_player.team_num == player.team_num:
+        for player in state.players:
+            if player.team_num == BLUE_TEAM:
                 qkv[n, 1] = 1  # is_teammate
             else:
                 qkv[n, 2] = 1  # is_opponent
-            car_data = other_player.inverted_car_data if invert else other_player.car_data
+            car_data = player.car_data
             qkv[n, 5:8] = car_data.position
             qkv[n, 8:11] = car_data.linear_velocity
             qkv[n, 11:14] = car_data.forward()
             qkv[n, 14:17] = car_data.up()
             qkv[n, 17:20] = car_data.angular_velocity
-            qkv[n, 20] = other_player.boost_amount
-            qkv[n, 21] = other_player.is_demoed  # Add demo timer?
-            qkv[n, 22] = other_player.on_ground
-            qkv[n, 23] = other_player.has_flip
+            qkv[n, 20] = player.boost_amount
+            qkv[n, 21] = player.is_demoed  # Add demo timer?
+            demos[n - 1] = player.is_demoed
+            qkv[n, 22] = player.on_ground
+            qkv[n, 23] = player.has_flip
             n += 1
 
-        boost_pads = state.inverted_boost_pads if invert else state.boost_pads
+        boost_pads = state.boost_pads
         qkv[n:, 4] = 1  # is_boost
         qkv[n:, 5:8] = self._boost_locations
-        qkv[n:, 20] = 0.12 + 0.88 * (self._boost_locations[2] > 72)  # Boost amount
+        qkv[n:, 20] = 0.12 + 0.88 * (self._boost_locations[:, 2] > 72)  # Boost amount
         qkv[n:, 21] = boost_pads  # Add boost timer?
 
+        self.current_qkv = qkv / self._norm
         mask = np.zeros(qkv.shape[0])
         mask[1 + len(state.players):1 + self.n_players] = 1
+        self.current_mask = mask
 
-        q = qkv[[main_n], :]
-        q = np.concatenate((q, np.expand_dims(previous_action, axis=0)), axis=1)
+        self.boost_timers -= self.tick_skip / 1200  # Pre-normalized, 120 fps for 10 seconds
+        new_boost_grabs = state.boost_pads & (self.boost_timers == 0)  # New boost grabs since last frame
+        self.boost_timers[new_boost_grabs] = 0.4 + 0.6 * (self._boost_locations[new_boost_grabs, 2] > 72)
+        self.boost_timers *= state.boost_pads  # Make sure we have zeros right
+
+        self.demo_timers -= self.tick_skip / 1200
+        new_demos = demos & (self.demo_timers == 0)
+        self.demo_timers[new_demos] = 0.3
+        self.demo_timers *= demos
+
+    def build_obs(self, player: PlayerData, state: GameState, previous_action: np.ndarray) -> Any:
+        self.update_if_new_state(state)
+        invert = player.team_num == ORANGE_TEAM
+
+        qkv = self.current_qkv.copy()
+        mask = self.current_mask.copy()
+
+        main_n = state.players.index(player)
+        qkv[main_n, 0] = 1  # is_main
+        if invert:
+            qkv[:, [1, 2]] = qkv[:, [2, 1]]  # Swap blue/orange
+            qkv *= self._invert  # Negate x and y values
+
+        q = qkv[main_n, :]
+        q = np.expand_dims(np.concatenate((q, previous_action), axis=1), axis=0)
         # kv = np.delete(qkv, main_n, axis=0)  # Delete main? Watch masking
         kv = qkv
-        kv[:, 5:11] -= q[:, 5:11]  # Pos and vel are relative
+
+        # With EARLPerceiver we can use relative coords+vel(+more?) for key/value tensor, might be smart
+        kv[:, 5:11] -= q[:, 5:11]
         return q, kv, mask
 
 
