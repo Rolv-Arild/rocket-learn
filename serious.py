@@ -41,15 +41,20 @@ class SeriousObsBuilder(ObsBuilder):
     def update_if_new_state(self, state: GameState):
         if self.current_state == state:  # No need to update
             return
+        
         qkv = np.zeros((1 + self.n_players + len(state.boost_pads), 24))  # Ball, players, boosts
+        
+        # Add ball
+        n = 0
         ball = state.ball
         qkv[0, 3] = 1  # is_ball
         qkv[0, 5:8] = ball.position
         qkv[0, 8:11] = ball.linear_velocity
         qkv[0, 17:20] = ball.angular_velocity
 
-        demos = np.zeros(len(state.players))
-        n = 1
+        # Add players
+        n += 1
+        demos = np.zeros(len(state.players))  # Which players are currently demoed
         for player in state.players:
             if player.team_num == BLUE_TEAM:
                 qkv[n, 1] = 1  # is_teammate
@@ -62,32 +67,41 @@ class SeriousObsBuilder(ObsBuilder):
             qkv[n, 14:17] = car_data.up()
             qkv[n, 17:20] = car_data.angular_velocity
             qkv[n, 20] = player.boost_amount
-            qkv[n, 21] = player.is_demoed  # Add demo timer?
-            demos[n - 1] = player.is_demoed
+#             qkv[n, 21] = player.is_demoed
+            demos[n - 1] = player.is_demoed  # Keep track for demo timer
             qkv[n, 22] = player.on_ground
             qkv[n, 23] = player.has_flip
             n += 1
-
+        
+        # Add boost pads
+        n = 1 + self.n_players
         boost_pads = state.boost_pads
         qkv[n:, 4] = 1  # is_boost
         qkv[n:, 5:8] = self._boost_locations
         qkv[n:, 20] = 0.12 + 0.88 * (self._boost_locations[:, 2] > 72)  # Boost amount
-        qkv[n:, 21] = boost_pads  # Add boost timer?
+#         qkv[n:, 21] = boost_pads
+        
+        # Boost and demo timers
+        new_boost_grabs = state.boost_pads & (self.boost_timers == 0)  # New boost grabs since last frame
+        self.boost_timers[new_boost_grabs] = 0.4 + 0.6 * (self._boost_locations[new_boost_grabs, 2] > 72)
+        self.boost_timers *= state.boost_pads  # Make sure we have zeros right
+        qkv[1 + self.n_players:, 21] = self.boost_timers
+        self.boost_timers -= self.tick_skip / 1200  # Pre-normalized, 120 fps for 10 seconds
+        self.boost_timers[self.boost_timers < 0] = 0
 
+        new_demos = demos & (self.demo_timers == 0)
+        self.demo_timers[new_demos] = 0.3
+        self.demo_timers *= demos
+        qkv[1 : 1 + self.n_players, 21] = self.demo_timers
+        self.demo_timers -= self.tick_skip / 1200
+        self.demo_timers[self.demo_timers < 0] = 0
+        
+        # Store results
         self.current_qkv = qkv / self._norm
         mask = np.zeros(qkv.shape[0])
         mask[1 + len(state.players):1 + self.n_players] = 1
         self.current_mask = mask
 
-        self.boost_timers -= self.tick_skip / 1200  # Pre-normalized, 120 fps for 10 seconds
-        new_boost_grabs = state.boost_pads & (self.boost_timers == 0)  # New boost grabs since last frame
-        self.boost_timers[new_boost_grabs] = 0.4 + 0.6 * (self._boost_locations[new_boost_grabs, 2] > 72)
-        self.boost_timers *= state.boost_pads  # Make sure we have zeros right
-
-        self.demo_timers -= self.tick_skip / 1200
-        new_demos = demos & (self.demo_timers == 0)
-        self.demo_timers[new_demos] = 0.3
-        self.demo_timers *= demos
 
     def build_obs(self, player: PlayerData, state: GameState, previous_action: np.ndarray) -> Any:
         self.update_if_new_state(state)
@@ -103,7 +117,7 @@ class SeriousObsBuilder(ObsBuilder):
             qkv *= self._invert  # Negate x and y values
 
         q = qkv[main_n, :]
-        q = np.expand_dims(np.concatenate((q, previous_action), axis=1), axis=0)
+        q = np.expand_dims(np.concatenate((q, previous_action), axis=0), axis=0)
         # kv = np.delete(qkv, main_n, axis=0)  # Delete main? Watch masking
         kv = qkv
 
