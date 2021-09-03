@@ -7,18 +7,16 @@ from typing import Any
 import numpy as np
 import torch.jit
 from earl_pytorch import EARLPerceiver, ControlsPredictorDiscrete
-from rlgym_tools.extra_rewards.distribute_rewards import DistributeRewards
 from torch.nn import Sequential, Linear
 
 import wandb
 from rlgym.envs import Match
-from rlgym.utils import ObsBuilder, TerminalCondition, RewardFunction, StateSetter
+from rlgym.utils import ObsBuilder, RewardFunction
 from rlgym.utils.common_values import ORANGE_TEAM, BOOST_LOCATIONS, BLUE_TEAM, BLUE_GOAL_BACK, ORANGE_GOAL_BACK, \
     BALL_MAX_SPEED, CEILING_Z
 from rlgym.utils.gamestates import PlayerData, GameState
-from rlgym.utils.math import cosine_similarity, scalar_projection
-from rlgym.utils.reward_functions.common_rewards import EventReward
-from rlgym.utils.state_setters import StateWrapper, DefaultState
+from rlgym.utils.math import scalar_projection
+from rlgym.utils.state_setters import DefaultState
 from rlgym.utils.terminal_conditions.common_conditions import NoTouchTimeoutCondition, GoalScoredCondition
 from rocket_learn.ppo import PPOAgent, PPO
 from rocket_learn.rollout_generator.redis_rollout_generator import RedisRolloutGenerator
@@ -153,10 +151,10 @@ class SeriousRewardFunction(RewardFunction):
         self.last_state = None
         self.current_state = initial_state
         self.rewards = np.zeros(len(initial_state.players))
-    
-    def _maybe_update_rewards(state: GameState):
+
+    def _maybe_update_rewards(self, state: GameState):
         if state == self.current_state:
-            continue
+            return
         self.n = 0
         self.last_state = self.current_state
         self.current_state = state
@@ -166,30 +164,30 @@ class SeriousRewardFunction(RewardFunction):
         i = 0
         for old_p, new_p in zip(self.last_state.players, self.current_state.players):
             assert old_p.car_id == new_p.car_id
-            rew = self.goal_w * (new_p.match_goals - old_p.match_shots) + \
-                   self.shot_w * (new_p.match_shots - old_p.match_shots) + \
-                   self.save_w * (new_p.match_saves - old_p.match_saves) + \
-                   self.demo_w * (new_p.match_demolishes - old_p.match_demolishes) + \
-                   self.boost_w * max(new_p.boost_amount - old_p.boost_amount, 0)
-            # Some napkin math: going around edge of field picking up 100 boost every second and gamma 0.995, tick skip 8
-            # Discounted future reward in the limit would be (0.5 / (1 * 15)) / (1 - 0.995) = 6.67 as a generous estimate
+            rew = (self.goal_w * (new_p.match_goals - old_p.match_shots) +
+                   self.shot_w * (new_p.match_shots - old_p.match_shots) +
+                   self.save_w * (new_p.match_saves - old_p.match_saves) +
+                   self.demo_w * (new_p.match_demolishes - old_p.match_demolishes) +
+                   self.boost_w * max(new_p.boost_amount - old_p.boost_amount, 0))
+            # Some napkin math: going around edge of field picking up 100 boost every second and gamma 0.995, skip 8
+            # Discounted future reward in limit would be (0.5 / (1 * 15)) / (1 - 0.995) = 6.67 as a generous estimate
             # Pros are generally around maybe 400 bcpm, which would be 0.44 limit
             if new_p.ball_touched:
                 target = np.array(BLUE_GOAL_BACK if new_p.team_num == BLUE_TEAM else ORANGE_GOAL_BACK)
                 curr_vel = self.current_state.ball.linear_velocity
                 last_vel = self.last_state.ball.linear_velocity
-                # On ground it gets about 0.05 just for touching, as well as some extra for the speed it produces towards opponent goal
-                # Close to 20 in the limit with ball on top, but opponents should learn to challenge since they get negative reward
-                rew += state.ball.position[2] / CEILING_Z + \
-                        scalar_projection(curr_vel - last_vel, target - state.ball.position) / BALL_MAX_SPEED
-            
+                # On ground it gets about 0.05 just for touching, as well as some extra for the speed it produces
+                # Close to 20 in the limit with ball on top, but opponents should learn to challenge way before that
+                rew += (state.ball.position[2] / CEILING_Z +
+                        scalar_projection(curr_vel - last_vel, target - state.ball.position) / BALL_MAX_SPEED)
+
             rewards[i] = rew
             if new_p.team_num == BLUE_TEAM:
                 blue_mask[i] = True
             else:
                 orange_mask[i] = True
             i += 1
-        
+
         blue_rewards = rewards[blue_mask]
         orange_rewards = rewards[orange_mask]
         blue_mean = np.nan_to_num(blue_rewards.mean())
@@ -203,8 +201,9 @@ class SeriousRewardFunction(RewardFunction):
         rew = self.rewards[self.n]
         self.n += 1
         return rew
-    
-def SeriousStateSetter(StateSetter):
+
+
+def SeriousStateSetter():
     # Use anything other than DefaultState?
     # Random is useful at start since it has to actually learn where ball is (somewhat less necessary with relative obs)
     return DefaultState()
@@ -232,7 +231,7 @@ if __name__ == "__main__":
     actor = torch.jit.trace(Sequential(Linear(d, d), ControlsPredictorDiscrete(d)), torch.zeros(1, 1, d))
     critic = torch.jit.trace(Sequential(Linear(d, d), Linear(d, 1)), torch.zeros(1, 1, d))
     shared = torch.jit.trace(EARLPerceiver(d, query_features=32, key_value_features=24),
-                             (torch.zeros(10, 1, 32), torch.zeros(10, 1+6+34, 24), torch.zeros(10, 1+6+34)))
+                             (torch.zeros(10, 1, 32), torch.zeros(10, 1 + 6 + 34, 24), torch.zeros(10, 1 + 6 + 34)))
 
     agent = PPOAgent(actor=actor, critic=critic, shared=shared)
 
