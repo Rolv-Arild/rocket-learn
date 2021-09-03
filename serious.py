@@ -210,7 +210,7 @@ def SeriousStateSetter():
 
 
 def get_match():
-    weights = (6, 3, 2)  # equal number of agents
+    weights = (6, 3, 2)  # equal number of agents TODO central counter to manage which gamemode is launched
     return Match(
         reward_function=SeriousRewardFunction(),
         terminal_conditions=SeriousTerminalCondition(),
