@@ -149,16 +149,13 @@ class SeriousRewardFunction(RewardFunction):
         self.demo_w = demo_w
         self.boost_w = boost_w
 
-
-    # Something like DistributeRewards(EventReward(goal=4, shot=4, save=4, demo=4, touch=1))
-    # but find a way to reduce dribble abuse
-    # Also add std/max/min rewards to log so we can actually see progress
     def reset(self, initial_state: GameState):
         self.last_state = None
         self.current_state = initial_state
+        self.rewards = np.zeros(len(initial_state.players))
     
     def _maybe_update_rewards(state: GameState):
-        if state == self.current_state or self.last_state is None:
+        if state == self.current_state:
             continue
         self.n = 0
         self.last_state = self.current_state
@@ -183,7 +180,8 @@ class SeriousRewardFunction(RewardFunction):
                 last_vel = self.last_state.ball.linear_velocity
                 # On ground it gets about 0.05 just for touching, as well as some extra for the speed it produces towards opponent goal
                 # Close to 20 in the limit with ball on top, but opponents should learn to challenge since they get negative reward
-                rew += state.ball.position[2] / CEILING_Z + scalar_projection(curr_vel - last_vel, target - state.ball.position) / BALL_MAX_SPEED
+                rew += state.ball.position[2] / CEILING_Z + \
+                        scalar_projection(curr_vel - last_vel, target - state.ball.position) / BALL_MAX_SPEED
             
             rewards[i] = rew
             if new_p.team_num == BLUE_TEAM:
