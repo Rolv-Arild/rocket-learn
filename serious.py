@@ -14,11 +14,11 @@ import wandb
 from rlgym.envs import Match
 from rlgym.utils import ObsBuilder, TerminalCondition, RewardFunction, StateSetter
 from rlgym.utils.common_values import ORANGE_TEAM, BOOST_LOCATIONS, BLUE_TEAM, BLUE_GOAL_BACK, ORANGE_GOAL_BACK, \
-    BALL_MAX_SPEED
+    BALL_MAX_SPEED, CEILING_Z
 from rlgym.utils.gamestates import PlayerData, GameState
 from rlgym.utils.math import cosine_similarity, scalar_projection
 from rlgym.utils.reward_functions.common_rewards import EventReward
-from rlgym.utils.state_setters import StateWrapper
+from rlgym.utils.state_setters import StateWrapper, DefaultState
 from rlgym.utils.terminal_conditions.common_conditions import NoTouchTimeoutCondition, GoalScoredCondition
 from rocket_learn.ppo import PPOAgent, PPO
 from rocket_learn.rollout_generator.redis_rollout_generator import RedisRolloutGenerator
@@ -43,7 +43,7 @@ class SeriousObsBuilder(ObsBuilder):
         self.demo_timers = np.zeros(len(initial_state.players))
         self.boost_timers = np.zeros(len(initial_state.boost_pads))
 
-    def update_if_new_state(self, state: GameState):
+    def _maybe_update_obs(self, state: GameState):
         if self.current_state == state:  # No need to update
             return
 
@@ -108,7 +108,7 @@ class SeriousObsBuilder(ObsBuilder):
         self.current_mask = mask
 
     def build_obs(self, player: PlayerData, state: GameState, previous_action: np.ndarray) -> Any:
-        self.update_if_new_state(state)
+        self._maybe_update_obs(state)
         invert = player.team_num == ORANGE_TEAM
 
         qkv = self.current_qkv.copy()
@@ -135,9 +135,20 @@ def SeriousTerminalCondition(tick_skip=8):
 
 
 class SeriousRewardFunction(RewardFunction):
-    def __init__(self):
+    def __init__(self, team_spirit=0.3, goal_w=10, shot_w=5, save_w=5, demo_w=5, boost_w=0.5):
+        self.team_spirit = team_spirit
         self.last_state = None
         self.current_state = None
+        self.rewards = None
+        self.blue_rewards = None
+        self.orange_rewards = None
+        self.n = 0
+        self.goal_w = goal_w
+        self.shot_w = shot_w
+        self.save_w = save_w
+        self.demo_w = demo_w
+        self.boost_w = boost_w
+
 
     # Something like DistributeRewards(EventReward(goal=4, shot=4, save=4, demo=4, touch=1))
     # but find a way to reduce dribble abuse
@@ -145,34 +156,60 @@ class SeriousRewardFunction(RewardFunction):
     def reset(self, initial_state: GameState):
         self.last_state = None
         self.current_state = initial_state
+    
+    def _maybe_update_rewards(state: GameState):
+        if state == self.current_state or self.last_state is None:
+            continue
+        self.n = 0
+        self.last_state = self.current_state
+        self.current_state = state
+        rewards = np.zeros(len(state.players))
+        blue_mask = np.zeros_like(rewards, dtype=bool)
+        orange_mask = np.zeros_like(rewards, dtype=bool)
+        i = 0
+        for old_p, new_p in zip(self.last_state.players, self.current_state.players):
+            assert old_p.car_id == new_p.car_id
+            rew = self.goal_w * (new_p.match_goals - old_p.match_shots) + \
+                   self.shot_w * (new_p.match_shots - old_p.match_shots) + \
+                   self.save_w * (new_p.match_saves - old_p.match_saves) + \
+                   self.demo_w * (new_p.match_demolishes - old_p.match_demolishes) + \
+                   self.boost_w * max(new_p.boost_amount - old_p.boost_amount, 0)
+            # Some napkin math: going around edge of field picking up 100 boost every second and gamma 0.995, tick skip 8
+            # Discounted future reward in the limit would be (0.5 / (1 * 15)) / (1 - 0.995) = 6.67 as a generous estimate
+            # Pros are generally around maybe 400 bcpm, which would be 0.44 limit
+            if new_p.ball_touched:
+                target = np.array(BLUE_GOAL_BACK if new_p.team_num == BLUE_TEAM else ORANGE_GOAL_BACK)
+                curr_vel = self.current_state.ball.linear_velocity
+                last_vel = self.last_state.ball.linear_velocity
+                # On ground it gets about 0.05 just for touching, as well as some extra for the speed it produces towards opponent goal
+                # Close to 20 in the limit with ball on top, but opponents should learn to challenge since they get negative reward
+                rew += state.ball.position[2] / CEILING_Z + scalar_projection(curr_vel - last_vel, target - state.ball.position) / BALL_MAX_SPEED
+            
+            rewards[i] = rew
+            if new_p.team_num == BLUE_TEAM:
+                blue_mask[i] = True
+            else:
+                orange_mask[i] = True
+            i += 1
+        
+        blue_rewards = rewards[blue_mask]
+        orange_rewards = rewards[orange_mask]
+        blue_mean = np.nan_to_num(blue_rewards.mean())
+        orange_mean = np.nan_to_num(orange_rewards.mean())
+        self.rewards = np.zeros_like(rewards)
+        self.rewards[blue_mask] = (1 - self.team_spirit) * blue_rewards + self.team_spirit * blue_mean - orange_mean
+        self.rewards[orange_mask] = (1 - self.team_spirit) * orange_rewards + self.team_spirit * orange_mean - blue_mean
 
     def get_reward(self, player: PlayerData, state: GameState, previous_action: np.ndarray) -> float:
-        if state != self.current_state:
-            self.last_state = self.current_state
-            self.current_state = state
-        if self.last_state is None:
-            return 0
-
-        rew = 0
-        for p in self.last_state.players:
-            if p.car_id == player.car_id:
-                rew += 10 * (player.match_goals - p.match_shots) + \
-                       5 * (player.match_shots - p.match_shots) + \
-                       5 * (player.match_saves - p.match_saves) + \
-                       5 * (player.match_demolishes - p.match_demolishes)
-                break
-        if player.ball_touched:
-            target = np.array(BLUE_GOAL_BACK if player.team_num == BLUE_TEAM else ORANGE_GOAL_BACK)
-            curr_vel = self.current_state.ball.linear_velocity
-            last_vel = self.last_state.ball.linear_velocity
-            rew += scalar_projection(curr_vel - last_vel, target - state.ball.position) / BALL_MAX_SPEED
-
-
-class SeriousStateSetter(StateSetter):
+        self._maybe_update_rewards(state)
+        rew = self.rewards[self.n]
+        self.n += 1
+        return rew
+    
+def SeriousStateSetter(StateSetter):
     # Use anything other than DefaultState?
     # Random is useful at start since it has to actually learn where ball is (somewhat less necessary with relative obs)
-    def reset(self, state_wrapper: StateWrapper):
-        pass
+    return DefaultState()
 
 
 def get_match():
