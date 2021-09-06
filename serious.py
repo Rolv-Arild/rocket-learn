@@ -7,6 +7,8 @@ from typing import Any
 import numpy as np
 import torch.jit
 from earl_pytorch import EARLPerceiver, ControlsPredictorDiscrete
+from redis import Redis
+from torch import nn
 from torch.nn import Sequential, Linear
 
 import wandb
@@ -19,7 +21,9 @@ from rlgym.utils.math import scalar_projection
 from rlgym.utils.state_setters import DefaultState
 from rlgym.utils.terminal_conditions.common_conditions import NoTouchTimeoutCondition, GoalScoredCondition
 from rocket_learn.ppo import PPOAgent, PPO
-from rocket_learn.rollout_generator.redis_rollout_generator import RedisRolloutGenerator
+from rocket_learn.rollout_generator.redis_rollout_generator import RedisRolloutGenerator, RedisRolloutWorker
+
+WORKER_COUNTER = "worker-counter"
 
 
 class SeriousObsBuilder(ObsBuilder):
@@ -38,74 +42,82 @@ class SeriousObsBuilder(ObsBuilder):
         self.tick_skip = tick_skip
 
     def reset(self, initial_state: GameState):
-        self.demo_timers = np.zeros(len(initial_state.players))
+        self.demo_timers = np.zeros(self.n_players)
         self.boost_timers = np.zeros(len(initial_state.boost_pads))
+        # self.current_state = initial_state
 
     def _maybe_update_obs(self, state: GameState):
-        if self.current_state == state:  # No need to update
+        if state == self.current_state:  # No need to update
             return
 
-        qkv = np.zeros((1 + self.n_players + len(state.boost_pads), 24))  # Ball, players, boosts
+        if self.boost_timers is None:
+            self.reset(state)
+        else:
+            self.current_state = state
+
+        qkv = np.zeros((1, 1 + self.n_players + len(state.boost_pads), 24))  # Ball, players, boosts
 
         # Add ball
         n = 0
         ball = state.ball
-        qkv[0, 3] = 1  # is_ball
-        qkv[0, 5:8] = ball.position
-        qkv[0, 8:11] = ball.linear_velocity
-        qkv[0, 17:20] = ball.angular_velocity
+        qkv[0, 0, 3] = 1  # is_ball
+        qkv[0, 0, 5:8] = ball.position
+        qkv[0, 0, 8:11] = ball.linear_velocity
+        qkv[0, 0, 17:20] = ball.angular_velocity
 
         # Add players
         n += 1
-        demos = np.zeros(len(state.players))  # Which players are currently demoed
+        demos = np.zeros(self.n_players)  # Which players are currently demoed
         for player in state.players:
             if player.team_num == BLUE_TEAM:
-                qkv[n, 1] = 1  # is_teammate
+                qkv[0, n, 1] = 1  # is_teammate
             else:
-                qkv[n, 2] = 1  # is_opponent
+                qkv[0, n, 2] = 1  # is_opponent
             car_data = player.car_data
-            qkv[n, 5:8] = car_data.position
-            qkv[n, 8:11] = car_data.linear_velocity
-            qkv[n, 11:14] = car_data.forward()
-            qkv[n, 14:17] = car_data.up()
-            qkv[n, 17:20] = car_data.angular_velocity
-            qkv[n, 20] = player.boost_amount
-            #             qkv[n, 21] = player.is_demoed
+            qkv[0, n, 5:8] = car_data.position
+            qkv[0, n, 8:11] = car_data.linear_velocity
+            qkv[0, n, 11:14] = car_data.forward()
+            qkv[0, n, 14:17] = car_data.up()
+            qkv[0, n, 17:20] = car_data.angular_velocity
+            qkv[0, n, 20] = player.boost_amount
+            #             qkv[0, n, 21] = player.is_demoed
             demos[n - 1] = player.is_demoed  # Keep track for demo timer
-            qkv[n, 22] = player.on_ground
-            qkv[n, 23] = player.has_flip
+            qkv[0, n, 22] = player.on_ground
+            qkv[0, n, 23] = player.has_flip
             n += 1
 
         # Add boost pads
         n = 1 + self.n_players
         boost_pads = state.boost_pads
-        qkv[n:, 4] = 1  # is_boost
-        qkv[n:, 5:8] = self._boost_locations
-        qkv[n:, 20] = 0.12 + 0.88 * (self._boost_locations[:, 2] > 72)  # Boost amount
-        #         qkv[n:, 21] = boost_pads
+        qkv[0, n:, 4] = 1  # is_boost
+        qkv[0, n:, 5:8] = self._boost_locations
+        qkv[0, n:, 20] = 0.12 + 0.88 * (self._boost_locations[:, 2] > 72)  # Boost amount
+        #         qkv[0, n:, 21] = boost_pads
 
         # Boost and demo timers
-        new_boost_grabs = boost_pads & (self.boost_timers == 0)  # New boost grabs since last frame
+        new_boost_grabs = (boost_pads == 1) & (self.boost_timers == 0)  # New boost grabs since last frame
         self.boost_timers[new_boost_grabs] = 0.4 + 0.6 * (self._boost_locations[new_boost_grabs, 2] > 72)
         self.boost_timers *= boost_pads  # Make sure we have zeros right
-        qkv[1 + self.n_players:, 21] = self.boost_timers
+        qkv[0, 1 + self.n_players:, 21] = self.boost_timers
         self.boost_timers -= self.tick_skip / 1200  # Pre-normalized, 120 fps for 10 seconds
         self.boost_timers[self.boost_timers < 0] = 0
 
-        new_demos = demos & (self.demo_timers == 0)
+        new_demos = (demos == 1) & (self.demo_timers == 0)
         self.demo_timers[new_demos] = 0.3
         self.demo_timers *= demos
-        qkv[1: 1 + self.n_players, 21] = self.demo_timers
+        qkv[0, 1: 1 + self.n_players, 21] = self.demo_timers
         self.demo_timers -= self.tick_skip / 1200
         self.demo_timers[self.demo_timers < 0] = 0
 
         # Store results
         self.current_qkv = qkv / self._norm
-        mask = np.zeros(qkv.shape[0])
-        mask[1 + len(state.players):1 + self.n_players] = 1
+        mask = np.zeros((1, qkv.shape[1]))
+        mask[0, 1 + len(state.players):1 + self.n_players] = 1
         self.current_mask = mask
 
     def build_obs(self, player: PlayerData, state: GameState, previous_action: np.ndarray) -> Any:
+        if self.boost_timers is None:
+            return np.zeros(0)  # Obs space autodetect, make Aech happy
         self._maybe_update_obs(state)
         invert = player.team_num == ORANGE_TEAM
 
@@ -113,23 +125,23 @@ class SeriousObsBuilder(ObsBuilder):
         mask = self.current_mask.copy()
 
         main_n = state.players.index(player)
-        qkv[main_n, 0] = 1  # is_main
+        qkv[0, main_n, 0] = 1  # is_main
         if invert:
-            qkv[:, (1, 2)] = qkv[:, (2, 1)]  # Swap blue/orange
+            qkv[0, :, (1, 2)] = qkv[0, :, (2, 1)]  # Swap blue/orange
             qkv *= self._invert  # Negate x and y values
 
-        q = qkv[main_n, :]
-        q = np.expand_dims(np.concatenate((q, previous_action), axis=0), axis=0)
+        q = qkv[0, main_n, :]
+        q = np.expand_dims(np.concatenate((q, previous_action), axis=0), axis=(0, 1))
         # kv = np.delete(qkv, main_n, axis=0)  # Delete main? Watch masking
         kv = qkv
 
         # With EARLPerceiver we can use relative coords+vel(+more?) for key/value tensor, might be smart
-        kv[:, 5:11] -= q[:, 5:11]
+        kv[0, :, 5:11] -= q[0, 0, 5:11]
         return q, kv, mask
 
 
 def SeriousTerminalCondition(tick_skip=8):
-    return [NoTouchTimeoutCondition(round(30 * tick_skip / 120)), GoalScoredCondition()]
+    return [NoTouchTimeoutCondition(round(30 * 120 / tick_skip)), GoalScoredCondition()]
 
 
 class SeriousRewardFunction(RewardFunction):
@@ -209,41 +221,76 @@ def SeriousStateSetter():
     return DefaultState()
 
 
-def get_match():
-    weights = (6, 3, 2)  # equal number of agents TODO central counter to manage which gamemode is launched
+def get_match(r):
+    order = (1, 1, 2, 1, 1, 2, 3, 1, 1, 2, 3)  # Use mix of 1s, 2s and 3s?
+    team_size = order[r % len(order)]
     return Match(
         reward_function=SeriousRewardFunction(),
         terminal_conditions=SeriousTerminalCondition(),
         obs_builder=SeriousObsBuilder(),
         state_setter=SeriousStateSetter(),
         self_play=True,
-        team_size=random.choices((1, 2, 3), weights)[0],  # Use mix of 1s, 2s and 3s?
+        team_size=team_size,
     )
+
+
+class Necto(nn.Module):
+    def __init__(self, earl, output):
+        super().__init__()
+        self.earl = earl
+        self.output = output
+
+    def forward(self, inp):
+        q, kv, m = inp
+        res = self.output(self.earl(q, kv, m))
+        if isinstance(res, tuple):
+            return tuple(torch.squeeze(r) for r in res)
+        return torch.squeeze(res)
+
+
+def make_worker(host, name):
+    r = Redis(host=host, password="rocket-learn")
+    w = r.incr(WORKER_COUNTER) - 1
+    return RedisRolloutWorker(r, name, get_match(w)).run()
+
+
+def collate(observations):
+    transposed = tuple(zip(*observations))
+    return tuple(torch.as_tensor(np.vstack(t)).float() for t in transposed)
 
 
 if __name__ == "__main__":
     wandb.login(key=os.environ["WANDB_KEY"])
     logger = wandb.init(project="rocket-learn", entity="rolv-arild")
 
-    rollout_gen = RedisRolloutGenerator(password="rocket-learn", logger=logger, save_every=1)
+    redis = Redis(password="rocket-learn")
+    rollout_gen = RedisRolloutGenerator(redis, save_every=10, logger=logger)
 
-    d = 256
-    actor = torch.jit.trace(Sequential(Linear(d, d), ControlsPredictorDiscrete(d)), torch.zeros(1, 1, d))
-    critic = torch.jit.trace(Sequential(Linear(d, d), Linear(d, 1)), torch.zeros(1, 1, d))
-    shared = torch.jit.trace(EARLPerceiver(d, query_features=32, key_value_features=24),
-                             (torch.zeros(10, 1, 32), torch.zeros(10, 1 + 6 + 34, 24), torch.zeros(10, 1 + 6 + 34)))
+    # jit models can't be pickled
+    # ex_inp = (
+    #     (torch.zeros((10, 1, 32)), torch.zeros((10, 1 + 6 + 34, 24)), torch.zeros((10, 1 + 6 + 34))),)  # q, kv, mask
+    # critic = torch.jit.trace(
+    #     func=Necto(EARLPerceiver(128, query_features=32, key_value_features=24), Linear(128, 1)),
+    #     example_inputs=ex_inp
+    # )
+    # actor = torch.jit.trace(
+    #     func=Necto(EARLPerceiver(256, query_features=32, key_value_features=24), ControlsPredictorDiscrete(256)),
+    #     example_inputs=ex_inp
+    # )
+    critic = Necto(EARLPerceiver(128, query_features=32, key_value_features=24), Linear(128, 1))
+    actor = Necto(EARLPerceiver(256, query_features=32, key_value_features=24), ControlsPredictorDiscrete(256))
 
-    agent = PPOAgent(actor=actor, critic=critic, shared=shared)
+    agent = PPOAgent(actor=actor, critic=critic, collate_fn=collate)
 
     lr = 1e-5
     alg = PPO(
         rollout_gen,
         agent,
-        n_steps=1_000_000,
+        n_steps=1_0_000,
         batch_size=10_000,
         lr_critic=lr,
         lr_actor=lr,
-        lr_shared=lr,
+        # lr_shared=lr,
         epochs=10,
         logger=logger
     )

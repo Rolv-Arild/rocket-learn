@@ -1,5 +1,4 @@
 import io
-import os
 import time
 from typing import List, Optional
 
@@ -13,17 +12,20 @@ from rocket_learn.agent import BaseAgent
 from rocket_learn.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
 
-import wandb
+
+def _default_collate(observations):
+    return torch.as_tensor(np.stack(observations)).float()
 
 
 class PPOAgent(BaseAgent):
-    def __init__(self, actor: nn.Module, critic: nn.Module, shared: Optional[nn.Module] = None):
+    def __init__(self, actor: nn.Module, critic: nn.Module, shared: Optional[nn.Module] = None, collate_fn=None):
         super().__init__()
         self.actor = actor
         self.critic = critic
         if shared is None:
             shared = Identity()
         self.shared = shared
+        self.collate_fn = _default_collate if collate_fn is None else collate_fn
 
     def forward_actor_critic(self, obs):
         if self.shared is not None:
@@ -40,17 +42,13 @@ class PPOAgent(BaseAgent):
             obs = self.shared(obs)
         return self.critic(obs)
 
-    def serialize(self):
+    def get_model_params(self):
         buf = io.BytesIO()
         torch.save([self.actor, self.critic, self.shared], buf)
         return buf
 
-    def get_model_params(self, params):
-        return self.actor.state_dict(), self.critic.state_dict()
-
     def set_model_params(self, params) -> None:
-        self.actor.load_state_dict(params[0])
-        self.critic.load_state_dict(params[1])
+        torch.load(params.read())
 
 
 class PPO:
@@ -95,7 +93,7 @@ class PPO:
         self.vf_coef = vf_coef
         self.max_grad_norm = max_grad_norm
 
-        self.logger.watch([self.agent.actor, self.agent.critic, self.agent.shared])
+        self.logger.watch((self.agent.actor, self.agent.critic, self.agent.shared))
 
         # **TODO** allow different optimizer types
         self.optimizer = torch.optim.Adam([
@@ -166,7 +164,8 @@ class PPO:
         ep_steps = np.zeros(len(buffers))
         n = 0
         for buffer in buffers:  # Do discounts for each ExperienceBuffer individually
-            obs_tensor = th.as_tensor(np.stack(buffer.observations)).float()
+            obs_tensor = self.agent.collate_fn(buffer.observations)
+            # obs_tensor = th.as_tensor(np.stack(buffer.observations)).float()
             act_tensor = th.as_tensor(np.stack(buffer.actions))
             log_prob_tensor = th.as_tensor(buffer.log_prob)
             rew_tensor = th.as_tensor(buffer.rewards)
@@ -218,7 +217,11 @@ class PPO:
             "ep_len_mean": ep_steps.mean(),
         }, commit=False)
 
-        obs_tensor = th.cat(obs_tensors).float()
+        if isinstance(obs_tensors[0], tuple):
+            transposed = zip(*obs_tensors)
+            obs_tensor = tuple(th.cat(t).float() for t in transposed)
+        else:
+            obs_tensor = th.cat(obs_tensors).float()
         act_tensor = th.cat(act_tensors)
         log_prob_tensor = th.cat(log_prob_tensors).float()
         advantages_tensor = th.cat(advantage_tensors)
@@ -229,7 +232,10 @@ class PPO:
 
         # shuffle data
         indices = torch.randperm(advantages_tensor.shape[0])[:self.n_steps]
-        obs_tensor = obs_tensor[indices]
+        if isinstance(obs_tensor, tuple):
+            obs_tensor = tuple(o[indices] for o in obs_tensor)
+        else:
+            obs_tensor = obs_tensor[indices]
         act_tensor = act_tensor[indices]
         log_prob_tensor = log_prob_tensor[indices]
         advantages = advantages_tensor[indices]
@@ -246,7 +252,11 @@ class PPO:
             for i in range(0, self.n_steps, self.batch_size):
                 # Note: Will cut off final few samples
 
-                obs = obs_tensor[i: i + self.batch_size]
+                if isinstance(obs_tensor, tuple):
+                    obs = tuple(o[i: i + self.batch_size] for o in obs_tensor)
+                else:
+                    obs = obs_tensor[i: i + self.batch_size]
+
                 act = act_tensor[i: i + self.batch_size]
                 adv = advantages[i:i + self.batch_size]
                 ret = returns[i: i + self.batch_size]
