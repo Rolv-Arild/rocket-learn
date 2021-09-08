@@ -251,7 +251,7 @@ class Necto(nn.Module):
 def make_worker(host, name):
     r = Redis(host=host, password="rocket-learn")
     w = r.incr(WORKER_COUNTER) - 1
-    return RedisRolloutWorker(r, name, get_match(w)).run()
+    return RedisRolloutWorker(r, name, get_match(w), current_version_prob=1.).run()
 
 
 def collate(observations):
