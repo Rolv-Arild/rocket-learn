@@ -11,6 +11,7 @@ RLGym training tool
   - Recurrent?
   - Continuous actions if we really want
 - Redis features 
+  - Saving and loading (put everything we need into redis and call redis.save(), figure out loading)
   - Full setup (architecture, params, config?) communicated via redis, can start worker with only IP
   - Version quality is most important measurement, need to log it ✔
   - Implement quality update
