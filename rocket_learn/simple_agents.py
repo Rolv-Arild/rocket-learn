@@ -1,11 +1,8 @@
 from typing import Tuple
 
 import numpy as np
-import torch
 import torch as th
-from torch import nn
 from torch.distributions import Categorical
-import pickle
 
 from rocket_learn.agent import BaseAgent
 
@@ -48,27 +45,6 @@ class RandomAgent(BaseAgent):
 
 
 # ** This should be in its own file or packaged with PPO **
-class PPOAgent(BaseAgent):
-    def __init__(self, actor: nn.Module, critic: nn.Module):
-        super().__init__()
-        self.actor = actor
-        self.critic = critic
-
-    def forward_actor_critic(self, obs):
-        return self.forward_actor(obs), self.forward_critic(obs)
-
-    def forward_actor(self, obs):
-        return self.actor(obs)
-
-    def forward_critic(self, obs):
-        return self.critic(obs)
-
-    def get_model_params(self, params):
-        return self.actor.state_dict(), self.critic.state_dict()
-
-    def set_model_params(self, params) -> None:
-        self.actor.load_state_dict(params[0])
-        self.critic.load_state_dict(params[1])
 
 
 class NoOpAgent(BaseAgent):

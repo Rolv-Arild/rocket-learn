@@ -1,12 +1,14 @@
+import os
+
 import torch
+import wandb
 from torch import nn
-import torch.nn.functional as F
+
 from rlgym.utils.obs_builders import AdvancedObs
-from rlgym.utils.reward_functions.common_rewards import TouchBallReward, VelocityReward
+from rlgym.utils.reward_functions.common_rewards import VelocityReward
 from rlgym.utils.terminal_conditions.common_conditions import TimeoutCondition
-from rocket_learn.learner import PPO
+from rocket_learn.ppo import PPO, PPOAgent
 from rocket_learn.rollout_generator.redis_rollout_generator import RedisRolloutGenerator
-from rocket_learn.rollout_generator.simple_rollout_generator import SimpleRolloutGenerator
 
 
 class SplitLayer(nn.Module):
@@ -38,28 +40,35 @@ state_dim = 231
 print(state_dim)
 action_dim = 8
 
-critic = nn.Sequential(
+shared = nn.Sequential(
     nn.Linear(state_dim, 256),
     nn.ReLU(),
-    nn.Linear(256, 256),
+    nn.Linear(256, 128),
     nn.ReLU(),
-    nn.Linear(256, 1)
+)
+
+critic = nn.Sequential(
+    nn.Linear(128, 128),
+    nn.ReLU(),
+    nn.Linear(128, 1)
 )
 
 actor = nn.Sequential(
-    nn.Linear(state_dim, 64),
+    nn.Linear(128, 128),
     nn.ReLU(),
-    nn.Linear(64, 64),
-    nn.ReLU(),
-    nn.Linear(64, 21),
+    nn.Linear(128, 21),
     SplitLayer()
 )
 
 if __name__ == '__main__':
     # rollout_gen = SimpleRolloutGenerator(None, **get_match_args())
-    rollout_gen = RedisRolloutGenerator()
+    wandb.login(key=os.environ["WANDB_KEY"])
+    logger = wandb.init(project="rocket-learn", entity="rolv-arild")
 
-    alg = PPO(rollout_gen, actor, critic, n_steps=5000, batch_size=500, lr_critic=3e-4, lr_actor=3e-4, epochs=10)
+    rollout_gen = RedisRolloutGenerator(password="rocket-learn", logger=logger, save_every=1)
+
+    agent = PPOAgent(actor, critic, shared)
+    alg = PPO(rollout_gen, agent, n_steps=5000, batch_size=500, lr_critic=3e-4, lr_actor=3e-4, epochs=10, logger=logger)
     # rollout_gen.agent = alg.agent
     # rl_path = "C:\\EpicGames\\rocketleague\\Binaries\\Win64\\RocketLeague.exe"
     log_dir = "E:\\log_directory\\"

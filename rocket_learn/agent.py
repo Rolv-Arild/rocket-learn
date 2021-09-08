@@ -1,3 +1,4 @@
+import pickle
 from abc import abstractmethod, ABC
 from typing import List, Optional
 
@@ -34,6 +35,8 @@ class BaseAgent(ABC):
     def get_action_distribution(self, obs) -> List[Categorical]:
         if isinstance(obs, np.ndarray):
             obs = th.from_numpy(obs).float()
+        elif isinstance(obs, tuple):
+            obs = tuple(o if isinstance(o, th.Tensor) else th.from_numpy(o).float() for o in obs)
         logits = self.forward_actor(obs)
 
         return [Categorical(logits=logit) for logit in logits]
@@ -63,7 +66,7 @@ class BaseAgent(ABC):
         return self.index_action_map[np.arange(len(self.index_action_map)), action_indices]
 
     @abstractmethod
-    def get_model_params(self, params):
+    def get_model_params(self):
         raise NotImplementedError
 
     @abstractmethod
