@@ -8,6 +8,7 @@ import numpy as np
 import torch.jit
 from earl_pytorch import EARLPerceiver, ControlsPredictorDiscrete
 from redis import Redis
+import torch
 from torch import nn
 from torch.nn import Sequential, Linear
 
@@ -24,6 +25,7 @@ from rocket_learn.ppo import PPOAgent, PPO
 from rocket_learn.rollout_generator.redis_rollout_generator import RedisRolloutGenerator, RedisRolloutWorker
 
 WORKER_COUNTER = "worker-counter"
+
 
 
 class SeriousObsBuilder(ObsBuilder):
@@ -249,6 +251,7 @@ class Necto(nn.Module):
 
 
 def make_worker(host, name):
+    torch.set_num_threads(1)
     r = Redis(host=host, password="rocket-learn")
     w = r.incr(WORKER_COUNTER) - 1
     return RedisRolloutWorker(r, name, get_match(w), current_version_prob=1.).run()
