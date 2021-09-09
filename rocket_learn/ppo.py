@@ -1,6 +1,6 @@
 import io
 import time
-from typing import List, Optional
+from typing import List, Optional, Type
 
 import numpy as np
 import torch
@@ -70,9 +70,25 @@ class PPO:
         :param vf_coef: Value function coefficient for the loss calculation
     """
 
-    def __init__(self, rollout_generator: BaseRolloutGenerator, agent: PPOAgent, n_steps=4096, lr_actor=3e-4,
-                 lr_critic=3e-4, lr_shared=3e-4, gamma=0.99, batch_size=512, epochs=10, clip_range=0.2, ent_coef=0.01,
-                 gae_lambda=0.95, vf_coef=1, max_grad_norm=0.5, logger=None):
+    def __init__(
+            self,
+            rollout_generator: BaseRolloutGenerator,
+            agent: PPOAgent,
+            optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
+            n_steps=4096,
+            batch_size=512,
+            epochs=10,
+            lr_actor=3e-4,
+            lr_critic=3e-4,
+            lr_shared=3e-4,
+            gamma=0.99,
+            clip_range=0.2,
+            ent_coef=0.01,
+            gae_lambda=0.95,
+            vf_coef=1,
+            max_grad_norm=0.5,
+            logger=None
+    ):
         self.rollout_generator = rollout_generator
 
         # TODO let users choose their own agent
@@ -95,8 +111,7 @@ class PPO:
 
         self.logger.watch((self.agent.actor, self.agent.critic, self.agent.shared))
 
-        # **TODO** allow different optimizer types
-        self.optimizer = torch.optim.Adam([
+        self.optimizer = optimizer_class([
             {'params': self.agent.actor.parameters(), 'lr': lr_actor},
             {'params': self.agent.critic.parameters(), 'lr': lr_critic},
             {'params': self.agent.shared.parameters(), 'lr': lr_shared}
