@@ -14,8 +14,8 @@ from trueskill import Rating, rate
 from rlgym.envs import Match
 from rlgym.gamelaunch import LaunchPreference
 from rlgym.gym import Gym
-from rocket_learn.experience_buffer import ExperienceBuffer
-from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
+from rocket_learn.utils.experiencebuffer import ExperienceBuffer
+from rocket_learn.rollout_generators.base_rolloutgenerator import BaseRolloutGenerator
 from rocket_learn.utils import util
 from rocket_learn.utils.util import softmax
 

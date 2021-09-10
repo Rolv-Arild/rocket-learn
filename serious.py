@@ -21,7 +21,8 @@ from rlgym.utils.gamestates import PlayerData, GameState
 from rlgym.utils.math import scalar_projection
 from rlgym.utils.state_setters import DefaultState
 from rlgym.utils.terminal_conditions.common_conditions import NoTouchTimeoutCondition, GoalScoredCondition
-from rocket_learn.ppo import PPOAgent, PPO
+from rocket_learn.algorithms.ppo import PPO
+from rocket_learn.agents.ppo_agent import PPOAgent
 from rocket_learn.rollout_generator.redis_rollout_generator import RedisRolloutGenerator, RedisRolloutWorker
 
 WORKER_COUNTER = "worker-counter"

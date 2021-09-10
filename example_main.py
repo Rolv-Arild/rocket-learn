@@ -7,8 +7,9 @@ from torch import nn
 from rlgym.utils.obs_builders import AdvancedObs
 from rlgym.utils.reward_functions.common_rewards import VelocityReward
 from rlgym.utils.terminal_conditions.common_conditions import TimeoutCondition
-from rocket_learn.ppo import PPO, PPOAgent
-from rocket_learn.rollout_generator.redis_rollout_generator import RedisRolloutGenerator
+from rocket_learn.algorithms.ppo import PPO
+from rocket_learn.agents.ppo_agent import PPOAgent
+from rocket_learn.rollout_generators.redis_rolloutgenerator import RedisRolloutGenerator
 
 
 class SplitLayer(nn.Module):
