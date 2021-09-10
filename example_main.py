@@ -12,18 +12,6 @@ from rocket_learn.agents.ppo_agent import PPOAgent
 from rocket_learn.rollout_generators.redis_rolloutgenerator import RedisRolloutGenerator
 
 
-class SplitLayer(nn.Module):
-    def __init__(self, splits=None):
-        super().__init__()
-        if splits is not None:
-            self.splits = splits
-        else:
-            self.splits = (3, 3, 3, 3, 3, 2, 2, 2)
-
-    def forward(self, x):
-        return torch.split(x, self.splits, dim=-1)
-
-
 def get_match_args():
     return dict(
         game_speed=100,
@@ -34,8 +22,6 @@ def get_match_args():
         reward_fn=VelocityReward(negative=True),
     )
 
-
-self_play = True
 
 state_dim = 231
 print(state_dim)
