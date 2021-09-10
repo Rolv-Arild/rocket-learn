@@ -1,4 +1,4 @@
-from rocket_learn.Agents.BaseAgent import BaseAgent
+from rocket_learn.agents.base_agent import BaseAgent
 import torch
 import numpy as np
 from torch import nn

@@ -10,7 +10,6 @@ from rocket_learn.agents.ppo_agent import PPOAgent
 
 from rocket_learn.utils.experiencebuffer import ExperienceBuffer
 from rocket_learn.rollout_generators.base_rolloutgenerator import BaseRolloutGenerator
-from rocket_learn.rollout_generators.simple_rolloutgenerator import SimpleRolloutGenerator
 
 
 class PPO:
