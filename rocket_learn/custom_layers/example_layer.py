@@ -36,11 +36,12 @@ class MlpLayer:
 
     def get_shared_layers(self):
         pass
+
     def get_critic_layers(self):
         pass
+
     def get_actor_layers(self):
         pass
-
 
     def _build_sequential_layer(self):
         pass
