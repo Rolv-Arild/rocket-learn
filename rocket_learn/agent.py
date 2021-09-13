@@ -1,4 +1,3 @@
-import pickle
 from abc import abstractmethod, ABC
 from typing import List, Optional
 
@@ -56,10 +55,10 @@ class BaseAgent(ABC):
             log_prob = th.stack(
                 [dist.log_prob(action) for dist, action in zip(distribution, th.unbind(action_indices, dim=-1))], dim=-1
             ).sum(dim=-1)
-            returns.append(log_prob)
+            returns.append(log_prob.numpy())
         if include_entropy:
             entropy = th.stack([dist.entropy() for dist in distribution], dim=1).sum(dim=1)
-            returns.append(entropy)
+            returns.append(entropy.numpy())
         return tuple(returns)
 
     def get_action(self, action_indices) -> np.ndarray:
