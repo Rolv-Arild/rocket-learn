@@ -1,11 +1,8 @@
 from typing import Generator, Iterator
-
-from torch.nn import Module
-
 import rlgym
-from rocket_learn.agent import BaseAgent
-from rocket_learn.experience_buffer import ExperienceBuffer
-from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
+from rocket_learn.agents.base_agent import BaseAgent
+from rocket_learn.utils.experiencebuffer import ExperienceBuffer
+from rocket_learn.rollout_generators.base_rolloutgenerator import BaseRolloutGenerator
 from rocket_learn.utils.util import generate_episode
 
 

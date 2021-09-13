@@ -1,29 +1,12 @@
 # Preliminary setup for serious crowd-sourced model
 # Exact setup should probably be in different repo
-import os
-import random
 from typing import Any
 
 import numpy as np
-import torch.jit
-from earl_pytorch import EARLPerceiver, ControlsPredictorDiscrete
-from redis import Redis
-import torch
-from torch import nn
-from torch.nn import Sequential, Linear
 
-import wandb
-from rlgym.envs import Match
-from rlgym.utils.state_setters import DefaultState
-from rlgym.utils.terminal_conditions.common_conditions import NoTouchTimeoutCondition, GoalScoredCondition
-from rocket_learn.algorithms.ppo import PPO
-from rocket_learn.agents.ppo_agent import PPOAgent
-from rocket_learn.rollout_generators.redis_rolloutgenerator import RedisRolloutGenerator, RedisRolloutWorker
-from rocket_learn.observations.crowdsource_observation import SeriousObsBuilder
-from rocket_learn.rewards.crowdsource_reward import SeriousRewardFunction
-
-WORKER_COUNTER = "worker-counter"
-
+from rlgym.utils import ObsBuilder
+from rlgym.utils.common_values import ORANGE_TEAM, BOOST_LOCATIONS, BLUE_TEAM
+from rlgym.utils.gamestates import PlayerData, GameState
 
 
 class SeriousObsBuilder(ObsBuilder):
@@ -139,93 +122,3 @@ class SeriousObsBuilder(ObsBuilder):
         kv[0, :, 5:11] -= q[0, 0, 5:11]
         return q, kv, mask
 
-
-def SeriousTerminalCondition(tick_skip=8):
-    return [NoTouchTimeoutCondition(round(30 * 120 / tick_skip)), GoalScoredCondition()]
-
-
-def SeriousStateSetter():
-    # Use anything other than DefaultState?
-    # Random is useful at start since it has to actually learn where ball is (somewhat less necessary with relative obs)
-    return DefaultState()
-
-
-def get_match(r):
-    order = (1, 1, 2, 1, 1, 2, 3, 1, 1, 2, 3)  # Use mix of 1s, 2s and 3s?
-    team_size = order[r % len(order)]
-    return Match(
-        reward_function=SeriousRewardFunction(),
-        terminal_conditions=SeriousTerminalCondition(),
-        obs_builder=SeriousObsBuilder(),
-        state_setter=SeriousStateSetter(),
-        self_play=True,
-        team_size=team_size,
-    )
-
-
-class Necto(nn.Module):
-    def __init__(self, earl, output):
-        super().__init__()
-        self.earl = earl
-        self.output = output
-
-    def forward(self, inp):
-        q, kv, m = inp
-        res = self.output(self.earl(q, kv, m))
-        if isinstance(res, tuple):
-            return tuple(torch.squeeze(r) for r in res)
-        return torch.squeeze(res)
-
-
-def make_worker(host, name):
-    torch.set_num_threads(1)
-    r = Redis(host=host, password="rocket-learn")
-    w = r.incr(WORKER_COUNTER) - 1
-    return RedisRolloutWorker(r, name, get_match(w), current_version_prob=1.).run()
-
-
-def collate(observations):
-    transposed = tuple(zip(*observations))
-    return tuple(torch.as_tensor(np.vstack(t)).float() for t in transposed)
-
-
-if __name__ == "__main__":
-    wandb.login(key=os.environ["WANDB_KEY"])
-    logger = wandb.init(project="rocket-learn", entity="rolv-arild")
-
-    redis = Redis(password="rocket-learn")
-    rollout_gen = RedisRolloutGenerator(redis, save_every=10, logger=logger)
-
-    # jit models can't be pickled
-    # ex_inp = (
-    #     (torch.zeros((10, 1, 32)), torch.zeros((10, 1 + 6 + 34, 24)), torch.zeros((10, 1 + 6 + 34))),)  # q, kv, mask
-    # critic = torch.jit.trace(
-    #     func=Necto(EARLPerceiver(128, query_features=32, key_value_features=24), Linear(128, 1)),
-    #     example_inputs=ex_inp
-    # )
-    # actor = torch.jit.trace(
-    #     func=Necto(EARLPerceiver(256, query_features=32, key_value_features=24), ControlsPredictorDiscrete(256)),
-    #     example_inputs=ex_inp
-    # )
-    critic = Necto(EARLPerceiver(128, query_features=32, key_value_features=24), Linear(128, 1))
-    actor = Necto(EARLPerceiver(256, query_features=32, key_value_features=24), ControlsPredictorDiscrete(256))
-
-    agent = PPOAgent(actor=actor, critic=critic, collate_fn=collate)
-
-    lr = 1e-5
-    alg = PPO(
-        rollout_gen,
-        agent,
-        n_steps=1_0_000,
-        batch_size=10_000,
-        lr_critic=lr,
-        lr_actor=lr,
-        # lr_shared=lr,
-        epochs=10,
-        logger=logger
-    )
-
-    log_dir = "E:\\log_directory\\"
-    repo_dir = "E:\\repo_directory\\"
-
-    alg.run()

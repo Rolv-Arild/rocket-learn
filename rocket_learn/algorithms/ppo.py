@@ -1,54 +1,15 @@
-import io
 import time
-from typing import List, Optional, Type
+from typing import List, Type
 
 import numpy as np
 import torch
 import torch as th
 from torch import nn
-from torch.nn import functional as F, Identity
+from torch.nn import functional as F
+from rocket_learn.agents.ppo_agent import PPOAgent
 
-from rocket_learn.agent import BaseAgent
-from rocket_learn.experience_buffer import ExperienceBuffer
-from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
-
-
-def _default_collate(observations):
-    return torch.as_tensor(np.stack(observations)).float()
-
-
-class PPOAgent(BaseAgent):
-    def __init__(self, actor: nn.Module, critic: nn.Module, shared: Optional[nn.Module] = None, collate_fn=None):
-        super().__init__()
-        self.actor = actor
-        self.critic = critic
-        if shared is None:
-            shared = Identity()
-        self.shared = shared
-        self.collate_fn = _default_collate if collate_fn is None else collate_fn
-
-    def forward_actor_critic(self, obs):
-        if self.shared is not None:
-            obs = self.shared(obs)
-        return self.actor(obs), self.critic(obs)
-
-    def forward_actor(self, obs):
-        if self.shared is not None:
-            obs = self.shared(obs)
-        return self.actor(obs)
-
-    def forward_critic(self, obs):
-        if self.shared is not None:
-            obs = self.shared(obs)
-        return self.critic(obs)
-
-    def get_model_params(self):
-        buf = io.BytesIO()
-        torch.save([self.actor, self.critic, self.shared], buf)
-        return buf
-
-    def set_model_params(self, params) -> None:
-        torch.load(params.read())
+from rocket_learn.utils.experiencebuffer import ExperienceBuffer
+from rocket_learn.rollout_generators.base_rolloutgenerator import BaseRolloutGenerator
 
 
 class PPO:
@@ -73,7 +34,7 @@ class PPO:
     def __init__(
             self,
             rollout_generator: BaseRolloutGenerator,
-            agent: PPOAgent,
+            agent: PPOAgent = PPOAgent,
             optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam,
             n_steps=4096,
             batch_size=512,

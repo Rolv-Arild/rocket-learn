@@ -2,12 +2,11 @@ from typing import List, Tuple
 
 import numpy as np
 import torch.distributions
-from torch.distributions import Distribution, Categorical
 
 from rlgym.gym import Gym
-from rocket_learn.experience_buffer import ExperienceBuffer
+from rocket_learn.utils.experiencebuffer import ExperienceBuffer
 
-from rocket_learn.agent import BaseAgent
+from rocket_learn.agents.base_agent import BaseAgent
 
 
 def generate_episode(env: Gym, agents: List[BaseAgent]) -> (List[ExperienceBuffer], int):

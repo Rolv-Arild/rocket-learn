@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Iterator
 
-from rocket_learn.experience_buffer import ExperienceBuffer
+from rocket_learn.utils.experiencebuffer import ExperienceBuffer
 
 
 class BaseRolloutGenerator(ABC):
