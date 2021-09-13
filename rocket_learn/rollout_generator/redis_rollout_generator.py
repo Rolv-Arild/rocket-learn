@@ -77,6 +77,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             rollouts = []
             for n, (rollout, version) in enumerate(rollout_data):
                 rating = _unserialize(self.redis.lindex(QUALITIES, version))
+
                 if version == latest_version:
                     rollouts.append(rollout)
                 if n < blue_players:
@@ -93,7 +94,9 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             for rating, (rollout, version) in zip(r1 + r2, rollout_data):
                 versions.setdefault(version, []).append(rating)
 
-            del versions[0]  # v0 rating is fixed
+            if 0 in versions:
+                del versions[0]  # v0 rating is fixed
+
             for version, ratings in versions.items():
                 avg_rating = Rating((sum(r.mu for r in ratings) / len(ratings)),
                                     (sum(r.sigma for r in ratings) / len(ratings)))
@@ -106,9 +109,14 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.redis.rpush(OPPONENT_MODELS, agent)
         # Set quality
         ratings = [_unserialize(v) for v in self.redis.lrange(QUALITIES, 0, -1)]
+        mus = []
+
+        if len(ratings) > 0:
+            mus = [np.array([r.mu for r in ratings])]
+
         if ratings:
             self.logger.log({
-                "qualities": wandb.plot.line_series(np.arange(len(ratings)), [np.array(r.mu for r in ratings)],
+                "qualities": wandb.plot.line_series(np.arange(len(ratings)), mus,
                                                     ["quality"], "Qualities", "version")
             })
             quality = Rating(ratings[-1].mu)
