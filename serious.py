@@ -1,16 +1,15 @@
 # Preliminary setup for serious crowd-sourced model
 # Exact setup should probably be in different repo
 import os
-import random
 from typing import Any
 
 import numpy as np
+import torch
 import torch.jit
 from earl_pytorch import EARLPerceiver, ControlsPredictorDiscrete
 from redis import Redis
-import torch
 from torch import nn
-from torch.nn import Sequential, Linear
+from torch.nn import Linear
 
 import wandb
 from rlgym.envs import Match
@@ -25,7 +24,6 @@ from rocket_learn.ppo import PPOAgent, PPO
 from rocket_learn.rollout_generator.redis_rollout_generator import RedisRolloutGenerator, RedisRolloutWorker
 
 WORKER_COUNTER = "worker-counter"
-
 
 
 class SeriousObsBuilder(ObsBuilder):
@@ -176,9 +174,10 @@ class SeriousRewardFunction(RewardFunction):
         blue_mask = np.zeros_like(rewards, dtype=bool)
         orange_mask = np.zeros_like(rewards, dtype=bool)
         i = 0
+
         for old_p, new_p in zip(self.last_state.players, self.current_state.players):
             assert old_p.car_id == new_p.car_id
-            rew = (self.goal_w * (new_p.match_goals - old_p.match_shots) +
+            rew = (self.goal_w * (new_p.match_goals - old_p.match_goals) +
                    self.shot_w * (new_p.match_shots - old_p.match_shots) +
                    self.save_w * (new_p.match_saves - old_p.match_saves) +
                    self.demo_w * (new_p.match_demolishes - old_p.match_demolishes) +
@@ -187,7 +186,7 @@ class SeriousRewardFunction(RewardFunction):
             # Discounted future reward in limit would be (0.5 / (1 * 15)) / (1 - 0.995) = 6.67 as a generous estimate
             # Pros are generally around maybe 400 bcpm, which would be 0.44 limit
             if new_p.ball_touched:
-                target = np.array(BLUE_GOAL_BACK if new_p.team_num == BLUE_TEAM else ORANGE_GOAL_BACK)
+                target = np.array(ORANGE_GOAL_BACK if new_p.team_num == BLUE_TEAM else BLUE_GOAL_BACK)
                 curr_vel = self.current_state.ball.linear_velocity
                 last_vel = self.last_state.ball.linear_velocity
                 # On ground it gets about 0.05 just for touching, as well as some extra for the speed it produces
@@ -209,6 +208,8 @@ class SeriousRewardFunction(RewardFunction):
         self.rewards = np.zeros_like(rewards)
         self.rewards[blue_mask] = (1 - self.team_spirit) * blue_rewards + self.team_spirit * blue_mean - orange_mean
         self.rewards[orange_mask] = (1 - self.team_spirit) * orange_rewards + self.team_spirit * orange_mean - blue_mean
+        if (self.rewards > self.goal_w + 1).any():
+            print("Hei")
 
     def get_reward(self, player: PlayerData, state: GameState, previous_action: np.ndarray) -> float:
         self._maybe_update_rewards(state)
@@ -224,7 +225,8 @@ def SeriousStateSetter():
 
 
 def get_match(r):
-    order = (1, 1, 2, 1, 1, 2, 3, 1, 1, 2, 3)  # Use mix of 1s, 2s and 3s?
+    order = (1, 2, 3, 1, 1, 2, 1, 1, 3, 2, 1)  # Close as possible number of agents
+    # order = (1, 1, 2, 1, 1, 2, 3, 1, 1, 2, 3)  # Close as possible with 1s >= 2s >= 3s
     team_size = order[r % len(order)]
     return Match(
         reward_function=SeriousRewardFunction(),
@@ -254,7 +256,7 @@ def make_worker(host, name):
     torch.set_num_threads(1)
     r = Redis(host=host, password="rocket-learn")
     w = r.incr(WORKER_COUNTER) - 1
-    return RedisRolloutWorker(r, name, get_match(w), current_version_prob=1.).run()
+    return RedisRolloutWorker(r, name, get_match(w), current_version_prob=.9).run()
 
 
 def collate(observations):
@@ -267,6 +269,7 @@ if __name__ == "__main__":
     logger = wandb.init(project="rocket-learn", entity="rolv-arild")
 
     redis = Redis(password="rocket-learn")
+    redis.delete(WORKER_COUNTER)  # Reset to 0
     rollout_gen = RedisRolloutGenerator(redis, save_every=10, logger=logger)
 
     # jit models can't be pickled
@@ -289,7 +292,7 @@ if __name__ == "__main__":
     alg = PPO(
         rollout_gen,
         agent,
-        n_steps=1_0_000,
+        n_steps=1_000_000,
         batch_size=10_000,
         lr_critic=lr,
         lr_actor=lr,
