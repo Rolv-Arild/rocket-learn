@@ -19,6 +19,10 @@ def to_tensor(np_array, device="cpu"):
 
 # mostly ripped from https://github.com/npitsillos/deepRLalgos
 # need to heavily test this against sb2 ppo lstm policy baseline
+# thoughts on bptt impl
+# most likely going to need a general module-network structure
+# need a way to be able to collect batches for the extra dim req
+# probably will have a different strucure for PPO since we have one or many hidden states to track
 def create_fn(input_dim: Tuple[int], layers: Union[Tuple[int, int], Tuple[Tuple[str, int]]],
               layer_fn: Union[nn.Linear, nn.Conv2d, nn.LSTM] = None) -> nn.ModuleList():
     """
