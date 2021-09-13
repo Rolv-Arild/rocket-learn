@@ -84,8 +84,6 @@ class BaseNet(Network):
         for i, layer in enumerate(self.layers):
             if isinstance(layer, nn.Linear):
                 name = "fc"
-            elif isinstance(layer, nn.Conv2d):
-                name = "cnn"
             else:
                 name = "rnn"
             self.__setattr__(f"{name}{i}", layer)
