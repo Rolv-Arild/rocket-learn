@@ -1,6 +1,7 @@
 import io
 import time
 from typing import Optional, Type
+import os
 
 import numpy as np
 import torch
@@ -105,7 +106,8 @@ class PPO:
         self.agent.to(device)
         self.device = device
 
-        self.logger = logger
+        self.starting_epoch = 0
+
 
         # hyperparameters
         self.epochs = epochs
@@ -119,6 +121,7 @@ class PPO:
         self.vf_coef = vf_coef
         self.max_grad_norm = max_grad_norm
 
+        self.logger = logger
         self.logger.watch((self.agent.actor, self.agent.critic, self.agent.shared))
 
         self.optimizer = optimizer_class([
@@ -127,11 +130,17 @@ class PPO:
             {'params': self.agent.shared.parameters(), 'lr': lr_shared}
         ])
 
-    def run(self):
+    def run(self, epochs_per_save=None, save_dir=None):
         """
         Generate rollout data and train
         """
-        epoch = 0
+        if save_dir is None:
+            assert False and "I need to fix this"
+
+        current_run_dir = save_dir+"_"+str(time.time())
+        os.makedirs(current_run_dir)
+
+        epoch = self.starting_epoch
         rollout_gen = self.rollout_generator.generate_rollouts()
 
         while True:
@@ -154,6 +163,45 @@ class PPO:
             epoch += 1
             t1 = time.time()
             self.logger.log({"fps": self.n_steps / (t1 - t0)})
+
+            if epoch % epochs_per_save == 0 and save_dir:
+                self.save(current_run_dir, epoch)
+
+    def load(self, load_location):
+        """
+        load the model weights, optimizer values, and metadata
+        :param load_location: checkpoint folder to read
+        :return:
+        """
+
+        checkpoint = torch.load(load_location + "\\checkpoint")
+        self.agent.actor.load_state_dict(checkpoint['actor_state_dict'])
+        self.agent.critic.load_state_dict(checkpoint['actor_state_dict'])
+        self.agent.shared.load_state_dict(checkpoint['actor_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['actor_state_dict'])
+        self.starting_epoch = checkpoint['actor_state_dict']
+
+        print("Continuing training at epoch "+str(self.starting_epoch))
+
+    def save(self, save_location, current_step):
+        """
+        Save the model weights, optimizer values, and metadata
+        :param save_location: where to save
+        :param epoch: the current epoch when saved. Use to later continue training
+        """
+
+        version_str = str(self.logger.project) + "_" + str(current_step)
+        version_dir = save_location + "\\" + version_str
+
+        os.makedirs(version_dir)
+
+        torch.save({
+            'epoch': current_step,
+            'actor_state_dict': self.agent.actor.state_dict(),
+            'critic_state_dict': self.agent.critic.state_dict(),
+            'shared_state_dict': self.agent.shared.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+        }, version_dir + "\\checkpoint")
 
     def set_logger(self, logger):
         self.logger = logger
