@@ -173,7 +173,7 @@ class PPO:
         entropy = -torch.mean(entropy)
         return log_prob, entropy
 
-    def calculate(self, buffers: Iterator[ExperienceBuffer]):
+    def calculate(self, buffers: [ExperienceBuffer]):
         """
         Calculate loss and update network
         """

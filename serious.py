@@ -252,8 +252,9 @@ class Necto(nn.Module):
         return torch.squeeze(res)
 
 
-def make_worker(host, name):
-    torch.set_num_threads(1)
+def make_worker(host, name, limit_threads=False):
+    if limit_threads:
+        torch.set_num_threads(1)
     r = Redis(host=host, password="rocket-learn")
     w = r.incr(WORKER_COUNTER) - 1
     return RedisRolloutWorker(r, name, get_match(w), current_version_prob=.9).run()
