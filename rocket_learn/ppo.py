@@ -1,6 +1,6 @@
 import io
 import time
-from typing import Optional, Type
+from typing import Optional, Type, Iterator
 import os
 
 import numpy as np
@@ -20,6 +20,9 @@ def _default_collate(observations):
 
 
 class PPOAgent(BaseAgent):
+    """
+    Agent designed to work with PPO
+    """
     def __init__(self, actor: nn.Module, critic: nn.Module, shared: Optional[nn.Module] = None, collate_fn=None):
         super().__init__()
         self.actor = actor
@@ -69,6 +72,7 @@ class PPO:
         :param n_steps: The number of steps to run per update
         :param lr_actor: Actor optimizer learning rate (Adam)
         :param lr_critic: Critic optimizer learning rate (Adam)
+        :param lr_shared: Shared layer optimizer learning rate (Adam)
         :param gamma: Discount factor
         :param batch_size: Minibatch size
         :param epochs: Number of epoch when optimizing the loss
@@ -188,7 +192,7 @@ class PPO:
         entropy = -torch.mean(entropy)
         return log_prob, entropy
 
-    def calculate(self, buffers: [ExperienceBuffer]):
+    def calculate(self, buffers: Iterator[ExperienceBuffer]):
         """
         Calculate loss and update network
         """
