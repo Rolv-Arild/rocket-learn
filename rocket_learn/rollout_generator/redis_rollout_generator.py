@@ -9,6 +9,7 @@ import msgpack_numpy as m
 import numpy as np
 import wandb
 from redis import Redis
+from redis.exceptions import ResponseError
 from trueskill import Rating, rate
 
 from rlgym.envs import Match
@@ -164,7 +165,11 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         if n_updates % save_freq == 0:
             # self.redis.set(MODEL_N.format(self.n_updates // self.save_every), model_bytes)
             self._add_opponent(model_bytes)
-            self.redis.save()
+            try:
+                self.redis.save()
+            except ResponseError:
+                print("redis manual save aborted, save already in progress")
+
 
 
 class RedisRolloutWorker:

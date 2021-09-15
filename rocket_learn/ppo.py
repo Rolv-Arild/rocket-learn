@@ -156,7 +156,7 @@ class PPO:
 
             def _iter():
                 size = 0
-                progress = tqdm.tqdm(desc=f"PPO_iter_{epoch}", total=self.n_steps)
+                progress = tqdm.tqdm(desc=f"PPO_iter_{epoch}", total=self.n_steps, position=0, leave=True)
                 while size < self.n_steps:
                     try:
                         rollout = next(rollout_gen)
