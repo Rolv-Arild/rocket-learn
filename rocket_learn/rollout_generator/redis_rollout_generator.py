@@ -9,6 +9,7 @@ import msgpack_numpy as m
 import numpy as np
 import wandb
 from redis import Redis
+from redis.exceptions import ResponseError
 from trueskill import Rating, rate
 
 from rlgym.envs import Match
@@ -62,6 +63,9 @@ def _unserialize_model(buf):
 
 
 class RedisRolloutGenerator(BaseRolloutGenerator):
+    """
+    Rollout generator in charge of sending commands to workers via redis
+    """
     def __init__(self, redis: Redis, save_every=10, logger=None, clear=True):
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.redis = redis
@@ -141,6 +145,10 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.redis.rpush(QUALITIES, _serialize(tuple(quality)))
 
     def update_parameters(self, new_params):
+        """
+        update redis (and thus workers) with new model data and save data as future opponent
+        :param new_params: new model parameters
+        """
         model_bytes = _serialize_model(new_params)
         self.redis.set(MODEL_LATEST, model_bytes)
         self.redis.decr(VERSION_LATEST)
@@ -157,10 +165,17 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         if n_updates % save_freq == 0:
             # self.redis.set(MODEL_N.format(self.n_updates // self.save_every), model_bytes)
             self._add_opponent(model_bytes)
-            self.redis.save()
+            try:
+                self.redis.save()
+            except ResponseError:
+                print("redis manual save aborted, save already in progress")
 
 
-class RedisRolloutWorker:  # Provides RedisRolloutGenerator with rollouts via a Redis server
+
+class RedisRolloutWorker:
+    """
+    Provides RedisRolloutGenerator with rollouts via a Redis server
+    """
     def __init__(self, redis: Redis, name: str, match: Match, current_version_prob=.9):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
@@ -190,6 +205,9 @@ class RedisRolloutWorker:  # Provides RedisRolloutGenerator with rollouts via a 
         return index, probs[index]
 
     def run(self):  # Mimics Thread
+        """
+        begin processing in already launched match and push to redis
+        """
         n = 0
         while True:
             model_bytes = self.redis.get(MODEL_LATEST)

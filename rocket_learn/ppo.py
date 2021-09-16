@@ -1,6 +1,7 @@
 import io
 import time
-from typing import Optional, Type
+from typing import Optional, Type, Iterator
+import os
 
 import numpy as np
 import torch
@@ -19,6 +20,9 @@ def _default_collate(observations):
 
 
 class PPOAgent(BaseAgent):
+    """
+    Agent designed to work with PPO
+    """
     def __init__(self, actor: nn.Module, critic: nn.Module, shared: Optional[nn.Module] = None, collate_fn=None):
         super().__init__()
         self.actor = actor
@@ -68,6 +72,7 @@ class PPO:
         :param n_steps: The number of steps to run per update
         :param lr_actor: Actor optimizer learning rate (Adam)
         :param lr_critic: Critic optimizer learning rate (Adam)
+        :param lr_shared: Shared layer optimizer learning rate (Adam)
         :param gamma: Discount factor
         :param batch_size: Minibatch size
         :param epochs: Number of epoch when optimizing the loss
@@ -105,7 +110,8 @@ class PPO:
         self.agent.to(device)
         self.device = device
 
-        self.logger = logger
+        self.starting_epoch = 0
+
 
         # hyperparameters
         self.epochs = epochs
@@ -119,6 +125,7 @@ class PPO:
         self.vf_coef = vf_coef
         self.max_grad_norm = max_grad_norm
 
+        self.logger = logger
         self.logger.watch((self.agent.actor, self.agent.critic, self.agent.shared))
 
         self.optimizer = optimizer_class([
@@ -127,11 +134,20 @@ class PPO:
             {'params': self.agent.shared.parameters(), 'lr': lr_shared}
         ])
 
-    def run(self):
+    def run(self, epochs_per_save=None, save_dir=None):
         """
         Generate rollout data and train
+        :param epochs_per_save: number of epoches between checkpoint saves
+        :param save_dir: where to save
         """
-        epoch = 0
+        if save_dir:
+            current_run_dir = save_dir+"\\"+self.logger.project+"_"+str(time.time())
+            os.makedirs(current_run_dir)
+        elif epochs_per_save and not save_dir:
+            print("Warning: no save directory specified.")
+            print("Checkpoints will not be save.")
+
+        epoch = self.starting_epoch
         rollout_gen = self.rollout_generator.generate_rollouts()
 
         while True:
@@ -140,7 +156,7 @@ class PPO:
 
             def _iter():
                 size = 0
-                progress = tqdm.tqdm(desc=f"PPO_iter_{epoch}", total=self.n_steps)
+                progress = tqdm.tqdm(desc=f"PPO_iter_{epoch}", total=self.n_steps, position=0, leave=True)
                 while size < self.n_steps:
                     try:
                         rollout = next(rollout_gen)
@@ -154,6 +170,9 @@ class PPO:
             epoch += 1
             t1 = time.time()
             self.logger.log({"fps": self.n_steps / (t1 - t0)})
+
+            if save_dir and epoch % epochs_per_save == 0:
+                self.save(current_run_dir, epoch)
 
     def set_logger(self, logger):
         self.logger = logger
@@ -351,3 +370,40 @@ class PPO:
                 "value_loss": tot_value_loss / n,
             },
         )
+
+    def load(self, load_location):
+        """
+        load the model weights, optimizer values, and metadata
+        :param load_location: checkpoint folder to read
+        :return:
+        """
+
+        checkpoint = torch.load(load_location)
+        self.agent.actor.load_state_dict(checkpoint['actor_state_dict'])
+        self.agent.critic.load_state_dict(checkpoint['critic_state_dict'])
+        self.agent.shared.load_state_dict(checkpoint['shared_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.starting_epoch = checkpoint['epoch']
+
+        print("Continuing training at epoch " + str(self.starting_epoch))
+
+    def save(self, save_location, current_step):
+        """
+        Save the model weights, optimizer values, and metadata
+        :param save_location: where to save
+        :param epoch: the current epoch when saved. Use to later continue training
+        """
+
+        version_str = str(self.logger.project) + "_" + str(current_step)
+        version_dir = save_location + "\\" + version_str
+
+        os.makedirs(version_dir)
+
+        torch.save({
+            'epoch': current_step,
+            'actor_state_dict': self.agent.actor.state_dict(),
+            'critic_state_dict': self.agent.critic.state_dict(),
+            'shared_state_dict': self.agent.shared.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+        }, version_dir + "\\checkpoint.pt")
+
