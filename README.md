@@ -25,4 +25,4 @@ RLGym training tool
 - Known issues
   - Invalid values in logits appear very rarely, and seemingly at random
   - Policy update is super slow (5 mins+ using serious.py)
-  - Qualities are not updated correctly in wandb
+  - wandb logs happen twice (or so) as often as expected
