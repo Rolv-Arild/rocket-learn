@@ -22,3 +22,7 @@ RLGym training tool
   - Need to come to agreement on config (architecture, reward func, parameters etc.)
   - See `serious.py` for suggestions
   - Need nice name for the bot
+- Known issues
+  - Invalid values in logits appear very rarely, and seemingly at random
+  - Policy update is super slow (5 mins+)
+  - Qualities are not updated correctly in wandb
