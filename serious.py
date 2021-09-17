@@ -17,10 +17,11 @@ from rlgym.utils import ObsBuilder, RewardFunction
 from rlgym.utils.common_values import ORANGE_TEAM, BOOST_LOCATIONS, BLUE_TEAM, BLUE_GOAL_BACK, ORANGE_GOAL_BACK, \
     BALL_MAX_SPEED, CEILING_Z
 from rlgym.utils.gamestates import PlayerData, GameState
-from rlgym.utils.math import scalar_projection
 from rlgym.utils.state_setters import DefaultState
 from rlgym.utils.terminal_conditions.common_conditions import NoTouchTimeoutCondition, GoalScoredCondition
-from rocket_learn.ppo import PPOAgent, PPO
+from rocket_learn.agent.actor_critic_agent import ActorCriticAgent
+from rocket_learn.agent.discrete_policy import DiscretePolicy
+from rocket_learn.ppo import PPO
 from rocket_learn.rollout_generator.redis_rollout_generator import RedisRolloutGenerator, RedisRolloutWorker
 
 WORKER_COUNTER = "worker-counter"
@@ -192,7 +193,7 @@ class SeriousRewardFunction(RewardFunction):
                 # On ground it gets about 0.05 just for touching, as well as some extra for the speed it produces
                 # Close to 20 in the limit with ball on top, but opponents should learn to challenge way before that
                 rew += (state.ball.position[2] / CEILING_Z +
-                        scalar_projection(curr_vel - last_vel, target - state.ball.position) / BALL_MAX_SPEED)
+                        np.linalg.norm(curr_vel - last_vel) / BALL_MAX_SPEED)
 
             rewards[i] = rew
             if new_p.team_num == BLUE_TEAM:
@@ -238,7 +239,7 @@ def get_match(r):
     )
 
 
-class Necto(nn.Module):
+class Necto(nn.Module):  # Wraps earl + an output and takes only a single input
     def __init__(self, earl, output):
         super().__init__()
         self.earl = earl
@@ -284,20 +285,26 @@ if __name__ == "__main__":
     #     func=Necto(EARLPerceiver(256, query_features=32, key_value_features=24), ControlsPredictorDiscrete(256)),
     #     example_inputs=ex_inp
     # )
-    critic = Necto(EARLPerceiver(128, query_features=32, key_value_features=24), Linear(128, 1))
-    actor = Necto(EARLPerceiver(256, query_features=32, key_value_features=24), ControlsPredictorDiscrete(256))
-
-    agent = PPOAgent(actor=actor, critic=critic, collate_fn=collate)
+    critic = Necto(EARLPerceiver(128, query_features=32, key_value_features=24),
+                   Linear(128, 1))
+    actor = DiscretePolicy(Necto(EARLPerceiver(256, query_features=32, key_value_features=24),
+                                 ControlsPredictorDiscrete(256)))
 
     lr = 1e-5
+    optim = torch.optim.Adam([
+        {"params": actor.parameters(), "lr": 1e-5},
+        {"params": critic.parameters(), "lr": 1e-5}
+    ])
+
+    agent = ActorCriticAgent(actor=actor, critic=critic, optimizer=optim)
+
     alg = PPO(
         rollout_gen,
         agent,
-        n_steps=1_000_000,
-        batch_size=10_000,
-        lr_critic=lr,
-        lr_actor=lr,
-        # lr_shared=lr,
+        n_steps=100_000,
+        batch_size=20_000,
+        minibatch_size=10_000,
+        gamma=0.995,
         epochs=10,
         logger=logger
     )

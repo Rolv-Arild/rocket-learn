@@ -57,8 +57,7 @@ def _serialize_model(mdl):
 
 def _unserialize_model(buf):
     agent = pickle.loads(buf)
-    agent.to("cpu")
-    return agent
+    return agent.cpu()
     # return torch.load(buf)
 
 
@@ -66,6 +65,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
     """
     Rollout generator in charge of sending commands to workers via redis
     """
+
     def __init__(self, redis: Redis, save_every=10, logger=None, clear=True):
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.redis = redis
@@ -171,11 +171,11 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                 print("redis manual save aborted, save already in progress")
 
 
-
 class RedisRolloutWorker:
     """
     Provides RedisRolloutGenerator with rollouts via a Redis server
     """
+
     def __init__(self, redis: Redis, name: str, match: Match, current_version_prob=.9):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis

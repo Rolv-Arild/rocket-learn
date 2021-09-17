@@ -1,65 +1,22 @@
-import io
-import time
-from typing import Optional, Type, Iterator
+import cProfile
 import os
+import pstats
+import time
+from pstats import SortKey
+from typing import Type, Iterator, Union, Iterable
 
 import numpy as np
 import torch
 import torch as th
 import tqdm
 from torch import nn
-from torch.nn import functional as F, Identity
+from torch._six import inf
+from torch.nn import functional as F
+from torch.nn.utils import clip_grad_norm_
 
-from rocket_learn.agent import BaseAgent
+from rocket_learn.agent.actor_critic_agent import ActorCriticAgent
 from rocket_learn.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
-
-
-def _default_collate(observations):
-    return torch.as_tensor(np.stack(observations)).float()
-
-
-class PPOAgent(BaseAgent):
-    """
-    Agent designed to work with PPO
-    """
-    def __init__(self, actor: nn.Module, critic: nn.Module, shared: Optional[nn.Module] = None, collate_fn=None):
-        super().__init__()
-        self.actor = actor
-        self.critic = critic
-        if shared is None:
-            shared = Identity()
-        self.shared = shared
-        self.collate_fn = _default_collate if collate_fn is None else collate_fn
-
-    def to(self, device):
-        self.actor = self.actor.to(device)
-        self.critic = self.critic.to(device)
-        if self.shared is not None:
-            self.shared = self.shared.to(device)
-
-    def forward_actor_critic(self, obs):
-        if self.shared is not None:
-            obs = self.shared(obs)
-        return self.actor(obs), self.critic(obs)
-
-    def forward_actor(self, obs):
-        if self.shared is not None:
-            obs = self.shared(obs)
-        return self.actor(obs)
-
-    def forward_critic(self, obs):
-        if self.shared is not None:
-            obs = self.shared(obs)
-        return self.critic(obs)
-
-    def get_model_params(self):
-        buf = io.BytesIO()
-        torch.save([self.actor, self.critic, self.shared], buf)
-        return buf
-
-    def set_model_params(self, params) -> None:
-        torch.load(params.read())
 
 
 class PPO:
@@ -67,12 +24,8 @@ class PPO:
         Proximal Policy Optimization algorithm (PPO)
 
         :param rollout_generator: Function that will generate the rollouts
-        :param actor: Torch actor network
-        :param critic: Torch critic network
+        :param agent: An ActorCriticAgent
         :param n_steps: The number of steps to run per update
-        :param lr_actor: Actor optimizer learning rate (Adam)
-        :param lr_critic: Critic optimizer learning rate (Adam)
-        :param lr_shared: Shared layer optimizer learning rate (Adam)
         :param gamma: Discount factor
         :param batch_size: Minibatch size
         :param epochs: Number of epoch when optimizing the loss
@@ -85,14 +38,13 @@ class PPO:
     def __init__(
             self,
             rollout_generator: BaseRolloutGenerator,
-            agent: PPOAgent,
+            agent: ActorCriticAgent,
             n_steps=4096,
-            lr_actor=3e-4,
-            lr_critic=3e-4,
-            lr_shared=3e-4,
             gamma=0.99,
             batch_size=512,
             epochs=10,
+            # reuse=2,
+            minibatch_size=None,
             clip_range=0.2,
             ent_coef=0.01,
             gae_lambda=0.95,
@@ -106,57 +58,52 @@ class PPO:
 
         # TODO let users choose their own agent
         # TODO move agent to rollout generator
-        self.agent = agent
-        self.agent.to(device)
+        self.agent = agent.to(device)
         self.device = device
 
         self.starting_epoch = 0
 
-
         # hyperparameters
         self.epochs = epochs
         self.gamma = gamma
-        assert n_steps % batch_size == 0
+        # assert n_steps % batch_size == 0
+        # self.reuse = reuse
         self.n_steps = n_steps
         self.gae_lambda = gae_lambda
         self.batch_size = batch_size
+        self.minibatch_size = minibatch_size or batch_size
+        assert self.batch_size % self.minibatch_size == 0
         self.clip_range = clip_range
         self.ent_coef = ent_coef
         self.vf_coef = vf_coef
         self.max_grad_norm = max_grad_norm
 
         self.logger = logger
-        self.logger.watch((self.agent.actor, self.agent.critic, self.agent.shared))
+        self.logger.watch((self.agent.actor, self.agent.critic))
 
-        self.optimizer = optimizer_class([
-            {'params': self.agent.actor.parameters(), 'lr': lr_actor},
-            {'params': self.agent.critic.parameters(), 'lr': lr_critic},
-            {'params': self.agent.shared.parameters(), 'lr': lr_shared}
-        ])
-
-    def run(self, epochs_per_save=None, save_dir=None):
+    def run(self, epochs_per_save=10, save_dir=None):
         """
         Generate rollout data and train
-        :param epochs_per_save: number of epoches between checkpoint saves
+        :param epochs_per_save: number of epochs between checkpoint saves
         :param save_dir: where to save
         """
         if save_dir:
-            current_run_dir = save_dir+"\\"+self.logger.project+"_"+str(time.time())
+            current_run_dir = os.path.join(save_dir, self.logger.project + "_" + str(time.time()))
             os.makedirs(current_run_dir)
         elif epochs_per_save and not save_dir:
             print("Warning: no save directory specified.")
-            print("Checkpoints will not be save.")
+            print("Checkpoints will not be saved.")
 
         epoch = self.starting_epoch
         rollout_gen = self.rollout_generator.generate_rollouts()
 
         while True:
             t0 = time.time()
-            self.rollout_generator.update_parameters(self.agent)
+            self.rollout_generator.update_parameters(self.agent.actor)
 
             def _iter():
                 size = 0
-                progress = tqdm.tqdm(desc=f"PPO_iter_{epoch}", total=self.n_steps, position=0, leave=True)
+                progress = tqdm.tqdm(desc=f"Collecting rollouts ({epoch})", total=self.n_steps, position=0, leave=True)
                 while size < self.n_steps:
                     try:
                         rollout = next(rollout_gen)
@@ -172,7 +119,7 @@ class PPO:
             self.logger.log({"fps": self.n_steps / (t1 - t0)})
 
             if save_dir and epoch % epochs_per_save == 0:
-                self.save(current_run_dir, epoch)
+                self.save(current_run_dir, epoch)  # noqa
 
     def set_logger(self, logger):
         self.logger = logger
@@ -181,14 +128,12 @@ class PPO:
         """
         Calculate Log Probability and Entropy of actions
         """
-        dists = self.agent.get_action_distribution(observations)
+        dist = self.agent.actor.get_action_distribution(observations)
         # indices = self.agent.get_action_indices(dists)
 
-        log_prob = th.stack(
-            [dist.log_prob(action) for dist, action in zip(dists, th.unbind(actions, dim=1))], dim=1
-        ).sum(dim=1)
+        log_prob = self.agent.actor.log_prob(dist, actions)
+        entropy = self.agent.actor.entropy(dist, actions)
 
-        entropy = th.stack([dist.entropy() for dist in dists], dim=1).sum(dim=1)
         entropy = -torch.mean(entropy)
         return log_prob, entropy
 
@@ -211,14 +156,18 @@ class PPO:
         n = 0
 
         for buffer in buffers:  # Do discounts for each ExperienceBuffer individually
-            obs_tensor = self.agent.collate_fn(buffer.observations)
+            if isinstance(buffer.observations[0], (tuple, list)):
+                transposed = tuple(zip(*buffer.observations))
+                obs_tensor = tuple(torch.as_tensor(np.vstack(t)).float() for t in transposed)
+            else:
+                obs_tensor = th.as_tensor(np.stack(buffer.observations)).float()
             # obs_tensor = th.as_tensor(np.stack(buffer.observations)).float()
             act_tensor = th.as_tensor(np.stack(buffer.actions))
             log_prob_tensor = th.as_tensor(np.stack(buffer.log_prob))
             rew_tensor = th.as_tensor(np.stack(buffer.rewards))
             done_tensor = th.as_tensor(np.stack(buffer.dones))
 
-            log_prob_tensor.detach_()
+            log_prob_tensor.detach_()  # Unnecessary?
 
             size = rew_tensor.size()[0]
             advantages = th.zeros((size,), dtype=th.float)
@@ -232,7 +181,7 @@ class PPO:
                     x = tuple(o.to(self.device) for o in obs_tensor)
                 else:
                     x = obs_tensor.to(self.device)
-                values = self.agent.forward_critic(x).detach().cpu().numpy().flatten()  # No batching?
+                values = self.agent.critic(x).detach().cpu().numpy().flatten()  # No batching?
                 last_values = values[-1]
                 last_gae_lam = 0
                 for step in reversed(range(size)):
@@ -264,6 +213,7 @@ class PPO:
             n += 1
         ep_rewards = np.array(ep_rewards)
         ep_steps = np.array(ep_steps)
+
         self.logger.log({
             "ep_reward_mean": ep_rewards.mean(),
             "ep_reward_std": ep_rewards.std(),
@@ -284,15 +234,15 @@ class PPO:
         # print(th.mean(rewards_tensor).item())
 
         # shuffle data
-        indices = torch.randperm(advantages_tensor.shape[0])[:self.n_steps]
-        if isinstance(obs_tensor, tuple):
-            obs_tensor = tuple(o[indices] for o in obs_tensor)
-        else:
-            obs_tensor = obs_tensor[indices]
-        act_tensor = act_tensor[indices]
-        log_prob_tensor = log_prob_tensor[indices]
-        advantages = advantages_tensor[indices]
-        returns = returns_tensor[indices]
+        # indices = torch.randperm(advantages_tensor.shape[0])[:self.n_steps]
+        # if isinstance(obs_tensor, tuple):
+        #     obs_tensor = tuple(o[indices] for o in obs_tensor)
+        # else:
+        #     obs_tensor = obs_tensor[indices]
+        # act_tensor = act_tensor[indices]
+        # log_prob_tensor = log_prob_tensor[indices]
+        # advantages = advantages_tensor[indices]
+        # returns = returns_tensor[indices]
 
         tot_loss = 0
         tot_policy_loss = 0
@@ -300,21 +250,38 @@ class PPO:
         tot_value_loss = 0
         n = 0
 
+        pr = cProfile.Profile()
+        pr.enable()
+
+        pb = tqdm.tqdm(desc="Training network", total=self.epochs * self.batch_size, position=0, leave=True)
+
+        self.agent.optimizer.zero_grad()
         for e in range(self.epochs):
             # this is mostly pulled from sb3
-            for i in range(0, self.n_steps, self.batch_size):
+
+            indices = torch.randperm(advantages_tensor.shape[0])[:self.batch_size]
+            if isinstance(obs_tensor, tuple):
+                obs_batch = tuple(o[indices] for o in obs_tensor)
+            else:
+                obs_batch = obs_tensor[indices]
+            act_batch = act_tensor[indices]
+            log_prob_batch = log_prob_tensor[indices]
+            advantages_batch = advantages_tensor[indices]
+            returns_batch = returns_tensor[indices]
+
+            for i in range(0, self.batch_size, self.minibatch_size):
                 # Note: Will cut off final few samples
 
                 if isinstance(obs_tensor, tuple):
-                    obs = tuple(o[i: i + self.batch_size].to(self.device) for o in obs_tensor)
+                    obs = tuple(o[i: i + self.minibatch_size].to(self.device) for o in obs_batch)
                 else:
-                    obs = obs_tensor[i: i + self.batch_size].to(self.device)
+                    obs = obs_batch[i: i + self.minibatch_size].to(self.device)
 
-                act = act_tensor[i: i + self.batch_size].to(self.device)
-                adv = advantages[i:i + self.batch_size].to(self.device)
-                ret = returns[i: i + self.batch_size].to(self.device)
+                act = act_batch[i: i + self.minibatch_size].to(self.device)
+                adv = advantages_batch[i:i + self.minibatch_size].to(self.device)
+                ret = returns_batch[i: i + self.minibatch_size].to(self.device)
 
-                old_log_prob = log_prob_tensor[i: i + self.batch_size].to(self.device)
+                old_log_prob = log_prob_batch[i: i + self.minibatch_size].to(self.device)
 
                 # TODO optimization: use forward_actor_critic instead of separate in case shared, also use GPU
                 log_prob, entropy = self.evaluate_actions(obs, act)  # Assuming obs and actions as input
@@ -326,7 +293,7 @@ class PPO:
                 policy_loss = -torch.min(policy_loss_1, policy_loss_2).mean()
 
                 # **If we want value clipping, add it here**
-                values_pred = self.agent.forward_critic(obs)
+                values_pred = self.agent.critic(obs)
                 values_pred = th.squeeze(values_pred)
                 value_loss = F.mse_loss(ret, values_pred)
 
@@ -337,14 +304,10 @@ class PPO:
                     entropy_loss = entropy
 
                 loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
+                if not torch.isfinite(loss).all():
+                    print("And I oop")
 
-                self.optimizer.zero_grad()
                 loss.backward()
-
-                # Clip grad norm
-                if self.max_grad_norm is not None:
-                    nn.utils.clip_grad_norm_(self.agent.actor.parameters(), self.max_grad_norm)
-                self.optimizer.step()
 
                 # *** self.logger write here to log results ***
                 tot_loss += loss.item()
@@ -352,24 +315,26 @@ class PPO:
                 tot_entropy_loss += entropy_loss.item()
                 tot_value_loss += value_loss.item()
                 n += 1
+                pb.update(self.minibatch_size)
 
-                # loss
-                # policy loss
-                # entropy loss
-                # value loss
+            # Clip grad norm
+            if self.max_grad_norm is not None:
+                clip_grad_norm_(self.agent.actor.parameters(), self.max_grad_norm)
 
-                # average rewards
-                # average episode length
+            self.agent.optimizer.step()
+            self.agent.optimizer.zero_grad()
 
-                # hyper parameter logging or JSON info
-        self.logger.log(
-            {
-                "loss": tot_loss / n,
-                "policy_loss": tot_policy_loss / n,
-                "entropy_loss": tot_entropy_loss / n,
-                "value_loss": tot_value_loss / n,
-            },
-        )
+        pr.disable()
+        sortby = SortKey.CUMULATIVE
+        ps = pstats.Stats(pr).sort_stats(sortby).dump_stats("policy_update.pstats")
+        print("Hei")
+
+        self.logger.log({
+            "loss": tot_loss / n,
+            "policy_loss": tot_policy_loss / n,
+            "entropy_loss": tot_entropy_loss / n,
+            "value_loss": tot_value_loss / n,
+        }, commit=False)  # Is committed after when calculating fps
 
     def load(self, load_location):
         """
@@ -381,8 +346,8 @@ class PPO:
         checkpoint = torch.load(load_location)
         self.agent.actor.load_state_dict(checkpoint['actor_state_dict'])
         self.agent.critic.load_state_dict(checkpoint['critic_state_dict'])
-        self.agent.shared.load_state_dict(checkpoint['shared_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        # self.agent.shared.load_state_dict(checkpoint['shared_state_dict'])
+        self.agent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.starting_epoch = checkpoint['epoch']
 
         print("Continuing training at epoch " + str(self.starting_epoch))
@@ -403,7 +368,6 @@ class PPO:
             'epoch': current_step,
             'actor_state_dict': self.agent.actor.state_dict(),
             'critic_state_dict': self.agent.critic.state_dict(),
-            'shared_state_dict': self.agent.shared.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
+            # 'shared_state_dict': self.agent.shared.state_dict(),
+            'optimizer_state_dict': self.agent.optimizer.state_dict(),
         }, version_dir + "\\checkpoint.pt")
-
