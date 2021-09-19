@@ -14,8 +14,7 @@ from torch.nn import Linear
 import wandb
 from rlgym.envs import Match
 from rlgym.utils import ObsBuilder, RewardFunction
-from rlgym.utils.common_values import ORANGE_TEAM, BOOST_LOCATIONS, BLUE_TEAM, BLUE_GOAL_BACK, ORANGE_GOAL_BACK, \
-    BALL_MAX_SPEED, CEILING_Z
+from rlgym.utils.common_values import ORANGE_TEAM, BOOST_LOCATIONS, BLUE_TEAM, BALL_MAX_SPEED, CEILING_Z
 from rlgym.utils.gamestates import PlayerData, GameState
 from rlgym.utils.state_setters import DefaultState
 from rlgym.utils.terminal_conditions.common_conditions import NoTouchTimeoutCondition, GoalScoredCondition
@@ -125,7 +124,7 @@ class SeriousObsBuilder(ObsBuilder):
         qkv = self.current_qkv.copy()
         mask = self.current_mask.copy()
 
-        main_n = state.players.index(player)
+        main_n = state.players.index(player) + 1
         qkv[0, main_n, 0] = 1  # is_main
         if invert:
             qkv[0, :, (1, 2)] = qkv[0, :, (2, 1)]  # Swap blue/orange
@@ -187,7 +186,7 @@ class SeriousRewardFunction(RewardFunction):
             # Discounted future reward in limit would be (0.5 / (1 * 15)) / (1 - 0.995) = 6.67 as a generous estimate
             # Pros are generally around maybe 400 bcpm, which would be 0.44 limit
             if new_p.ball_touched:
-                target = np.array(ORANGE_GOAL_BACK if new_p.team_num == BLUE_TEAM else BLUE_GOAL_BACK)
+                # target = np.array(ORANGE_GOAL_BACK if new_p.team_num == BLUE_TEAM else BLUE_GOAL_BACK)
                 curr_vel = self.current_state.ball.linear_velocity
                 last_vel = self.last_state.ball.linear_velocity
                 # On ground it gets about 0.05 just for touching, as well as some extra for the speed it produces
@@ -209,8 +208,6 @@ class SeriousRewardFunction(RewardFunction):
         self.rewards = np.zeros_like(rewards)
         self.rewards[blue_mask] = (1 - self.team_spirit) * blue_rewards + self.team_spirit * blue_mean - orange_mean
         self.rewards[orange_mask] = (1 - self.team_spirit) * orange_rewards + self.team_spirit * orange_mean - blue_mean
-        if (self.rewards > self.goal_w + 1).any():
-            print("Hei")
 
     def get_reward(self, player: PlayerData, state: GameState, previous_action: np.ndarray) -> float:
         self._maybe_update_rewards(state)
@@ -253,7 +250,7 @@ class Necto(nn.Module):  # Wraps earl + an output and takes only a single input
         return torch.squeeze(res)
 
 
-def make_worker(host, name, limit_threads=False):
+def make_worker(host, name, limit_threads=True):
     if limit_threads:
         torch.set_num_threads(1)
     r = Redis(host=host, password="rocket-learn")
@@ -272,7 +269,7 @@ if __name__ == "__main__":
 
     redis = Redis(password="rocket-learn")
     redis.delete(WORKER_COUNTER)  # Reset to 0
-    rollout_gen = RedisRolloutGenerator(redis, save_every=10, logger=logger)
+    rollout_gen = RedisRolloutGenerator(redis, save_every=1, logger=logger)
 
     # jit models can't be pickled
     # ex_inp = (
@@ -285,15 +282,15 @@ if __name__ == "__main__":
     #     func=Necto(EARLPerceiver(256, query_features=32, key_value_features=24), ControlsPredictorDiscrete(256)),
     #     example_inputs=ex_inp
     # )
-    critic = Necto(EARLPerceiver(128, query_features=32, key_value_features=24),
+    critic = Necto(EARLPerceiver(128, 1, 4, 1, query_features=32, key_value_features=24),
                    Linear(128, 1))
-    actor = DiscretePolicy(Necto(EARLPerceiver(256, query_features=32, key_value_features=24),
+    actor = DiscretePolicy(Necto(EARLPerceiver(256, 1, 4, 1, query_features=32, key_value_features=24),
                                  ControlsPredictorDiscrete(256)))
 
     lr = 1e-5
     optim = torch.optim.Adam([
-        {"params": actor.parameters(), "lr": 1e-5},
-        {"params": critic.parameters(), "lr": 1e-5}
+        {"params": actor.parameters(), "lr": lr},
+        {"params": critic.parameters(), "lr": lr}
     ])
 
     agent = ActorCriticAgent(actor=actor, critic=critic, optimizer=optim)
@@ -301,15 +298,15 @@ if __name__ == "__main__":
     alg = PPO(
         rollout_gen,
         agent,
-        n_steps=100_000,
-        batch_size=20_000,
+        n_steps=1_000_000,
+        batch_size=200_000,
         minibatch_size=10_000,
-        gamma=0.995,
         epochs=10,
-        logger=logger
+        gamma=0.995,
+        logger=logger,
     )
 
     log_dir = "E:\\log_directory\\"
     repo_dir = "E:\\repo_directory\\"
 
-    alg.run()
+    alg.run(epochs_per_save=1)

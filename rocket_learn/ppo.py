@@ -198,12 +198,11 @@ class PPO:
                     v_targets[step] = v_target
 
             returns = advantages + values
-            advantages = (advantages - th.mean(advantages)) / (th.std(advantages) + 1e-8)
 
             obs_tensors.append(obs_tensor)
             act_tensors.append(act_tensor)
             log_prob_tensors.append(log_prob_tensor)
-            advantage_tensors.append(advantages)
+            # advantage_tensors.append(advantages)
             returns_tensors.append(returns)
             v_target_tensors.append(v_targets)
             rewards_tensors.append(rew_tensor)
@@ -227,7 +226,7 @@ class PPO:
             obs_tensor = th.cat(obs_tensors).float()
         act_tensor = th.cat(act_tensors)
         log_prob_tensor = th.cat(log_prob_tensors).float()
-        advantages_tensor = th.cat(advantage_tensors)
+        # advantages_tensor = th.cat(advantage_tensors)
         returns_tensor = th.cat(returns_tensors)
 
         # rewards_tensor = th.cat(rewards_tensors)
@@ -250,23 +249,20 @@ class PPO:
         tot_value_loss = 0
         n = 0
 
-        pr = cProfile.Profile()
-        pr.enable()
-
         pb = tqdm.tqdm(desc="Training network", total=self.epochs * self.batch_size, position=0, leave=True)
 
         self.agent.optimizer.zero_grad()
         for e in range(self.epochs):
             # this is mostly pulled from sb3
 
-            indices = torch.randperm(advantages_tensor.shape[0])[:self.batch_size]
+            indices = torch.randperm(returns_tensor.shape[0])[:self.batch_size]
             if isinstance(obs_tensor, tuple):
                 obs_batch = tuple(o[indices] for o in obs_tensor)
             else:
                 obs_batch = obs_tensor[indices]
             act_batch = act_tensor[indices]
             log_prob_batch = log_prob_tensor[indices]
-            advantages_batch = advantages_tensor[indices]
+            # advantages_batch = advantages_tensor[indices]
             returns_batch = returns_tensor[indices]
 
             for i in range(0, self.batch_size, self.minibatch_size):
@@ -278,7 +274,7 @@ class PPO:
                     obs = obs_batch[i: i + self.minibatch_size].to(self.device)
 
                 act = act_batch[i: i + self.minibatch_size].to(self.device)
-                adv = advantages_batch[i:i + self.minibatch_size].to(self.device)
+                # adv = advantages_batch[i:i + self.minibatch_size].to(self.device)
                 ret = returns_batch[i: i + self.minibatch_size].to(self.device)
 
                 old_log_prob = log_prob_batch[i: i + self.minibatch_size].to(self.device)
@@ -287,14 +283,17 @@ class PPO:
                 log_prob, entropy = self.evaluate_actions(obs, act)  # Assuming obs and actions as input
                 ratio = torch.exp(log_prob - old_log_prob)
 
+                values_pred = self.agent.critic(obs)
+                values_pred = th.squeeze(values_pred)
+                adv = ret - values_pred
+                adv = (adv - th.mean(adv)) / (th.std(adv) + 1e-8)
+
                 # clipped surrogate loss
                 policy_loss_1 = adv * ratio
                 policy_loss_2 = adv * th.clamp(ratio, 1 - self.clip_range, 1 + self.clip_range)
                 policy_loss = -torch.min(policy_loss_1, policy_loss_2).mean()
 
                 # **If we want value clipping, add it here**
-                values_pred = self.agent.critic(obs)
-                values_pred = th.squeeze(values_pred)
                 value_loss = F.mse_loss(ret, values_pred)
 
                 if entropy is None:
@@ -303,9 +302,8 @@ class PPO:
                 else:
                     entropy_loss = entropy
 
-                loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
-                if not torch.isfinite(loss).all():
-                    print("And I oop")
+                loss = ((policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss)
+                        / (self.batch_size / self.minibatch_size))
 
                 loss.backward()
 
@@ -323,11 +321,6 @@ class PPO:
 
             self.agent.optimizer.step()
             self.agent.optimizer.zero_grad()
-
-        pr.disable()
-        sortby = SortKey.CUMULATIVE
-        ps = pstats.Stats(pr).sort_stats(sortby).dump_stats("policy_update.pstats")
-        print("Hei")
 
         self.logger.log({
             "loss": tot_loss / n,

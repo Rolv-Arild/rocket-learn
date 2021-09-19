@@ -40,6 +40,7 @@ def generate_episode(env: Gym, policies: List[Policy]) -> (List[ExperienceBuffer
                 all_actions.append(actions)
                 all_log_probs.append(log_prob)
 
+            all_actions = np.array(all_actions)
             old_obs = observations
             observations, rewards, done, info = env.step(all_actions)
             if len(policies) <= 1:

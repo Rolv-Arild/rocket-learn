@@ -7,7 +7,10 @@ from uuid import uuid4
 import msgpack
 import msgpack_numpy as m
 import numpy as np
+import matplotlib.pyplot  # noqa
 import wandb
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from redis import Redis
 from redis.exceptions import ResponseError
 from trueskill import Rating, rate
@@ -122,7 +125,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                                         (sum(r.sigma for r in ratings) / len(ratings)))
                     if version > 0:  # Old
                         self.redis.lset(QUALITIES, version, _serialize(tuple(avg_rating)))
-                    elif version == latest_version:
+                    elif abs(version - latest_version) <= 1:
                         self.redis.set(QUALITY_LATEST, _serialize(tuple(avg_rating)))
 
                 yield from rollouts
@@ -134,11 +137,21 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         ratings = [Rating(*_unserialize(v)) for v in self.redis.lrange(QUALITIES, 0, -1)]
         if ratings:
             mus = np.array([r.mu for r in ratings])
+            conf = np.array([r.sigma for r in ratings])
+            fig = Figure()
+            ax: Axes = fig.subplots()
+            ax.plot(np.arange(len(ratings)), mus, color="royalblue")
+            ax.fill_between(np.arange(len(ratings)), mus + 3 * conf, mus - 3 * conf, color="lightsteelblue")
+            ax.set_xlabel("Iteration")
+            ax.set_ylabel("TrueSkill")
+            ax.set_title("Qualities")
+
             self.logger.log({
-                "qualities": wandb.plot.line_series(np.arange(len(mus)), [mus],
-                                                    # noqa
-                                                    ["quality"], "Qualities", "version")
-            })
+                "qualities": wandb.Image(fig),
+                # "qualities": wandb.plot.line_series(np.arange(len(mus)), [mus],
+                #                                     # noqa
+                #                                     ["quality"], "Qualities", "version")
+            }, commit=False)
             quality = Rating(ratings[-1].mu)  # Same mu, reset sigma
         else:
             quality = Rating(0, 1)  # First agent is fixed at 0
@@ -242,6 +255,7 @@ class RedisRolloutWorker:
                     agents.append((selected_agent, version, prob))
 
             np.random.shuffle(agents)
+            print("Generating rollout with versions:", [v for a, v, p in agents])
 
             rollouts, result = util.generate_episode(self.env, [agent for agent, version, prob in agents])
 
