@@ -14,8 +14,9 @@ from torch.nn import Linear
 import wandb
 from rlgym.envs import Match
 from rlgym.utils import ObsBuilder, RewardFunction
-from rlgym.utils.common_values import ORANGE_TEAM, BOOST_LOCATIONS, BLUE_TEAM, BALL_MAX_SPEED, CEILING_Z
+from rlgym.utils.common_values import ORANGE_TEAM, BOOST_LOCATIONS, BLUE_TEAM, BALL_MAX_SPEED, CEILING_Z, CAR_MAX_SPEED
 from rlgym.utils.gamestates import PlayerData, GameState
+from rlgym.utils.reward_functions.common_rewards import VelocityReward
 from rlgym.utils.state_setters import DefaultState
 from rlgym.utils.terminal_conditions.common_conditions import NoTouchTimeoutCondition, GoalScoredCondition
 from rocket_learn.agent.actor_critic_agent import ActorCriticAgent
@@ -158,6 +159,10 @@ class SeriousRewardFunction(RewardFunction):
         self.save_w = save_w
         self.demo_w = demo_w
         self.boost_w = boost_w
+        self.touch_height_w = 1
+        self.touch_accel_w = 1
+        self.car_accel_w = 0.1
+        self.cb_accel_w = 0.1
 
     def reset(self, initial_state: GameState):
         self.last_state = None
@@ -191,8 +196,13 @@ class SeriousRewardFunction(RewardFunction):
                 last_vel = self.last_state.ball.linear_velocity
                 # On ground it gets about 0.05 just for touching, as well as some extra for the speed it produces
                 # Close to 20 in the limit with ball on top, but opponents should learn to challenge way before that
-                rew += (state.ball.position[2] / CEILING_Z +
-                        np.linalg.norm(curr_vel - last_vel) / BALL_MAX_SPEED)
+                rew += (self.touch_height_w * state.ball.position[2] / CEILING_Z +
+                        self.touch_accel_w * np.linalg.norm(curr_vel - last_vel) / BALL_MAX_SPEED)
+
+            diff_vel = (new_p.car_data.linear_velocity - old_p.car_data.linear_velocity) / CAR_MAX_SPEED
+            diff_pos = self.current_state.ball.position - new_p.car_data.position
+            rew += (self.car_accel_w * np.linalg.norm(diff_vel) +
+                    self.cb_accel_w * np.dot(diff_vel, diff_pos / np.linalg.norm(diff_pos)))
 
             rewards[i] = rew
             if new_p.team_num == BLUE_TEAM:
@@ -269,7 +279,7 @@ if __name__ == "__main__":
 
     redis = Redis(password="rocket-learn")
     redis.delete(WORKER_COUNTER)  # Reset to 0
-    rollout_gen = RedisRolloutGenerator(redis, save_every=1, logger=logger)
+    rollout_gen = RedisRolloutGenerator(redis, save_every=10, logger=logger)
 
     # jit models can't be pickled
     # ex_inp = (
@@ -299,9 +309,9 @@ if __name__ == "__main__":
         rollout_gen,
         agent,
         n_steps=1_000_000,
-        batch_size=200_000,
+        batch_size=20_000,
         minibatch_size=10_000,
-        epochs=10,
+        epochs=50,
         gamma=0.995,
         logger=logger,
     )
@@ -309,4 +319,4 @@ if __name__ == "__main__":
     log_dir = "E:\\log_directory\\"
     repo_dir = "E:\\repo_directory\\"
 
-    alg.run(epochs_per_save=1)
+    alg.run(epochs_per_save=10)

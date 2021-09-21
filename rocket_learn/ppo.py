@@ -1,16 +1,12 @@
-import cProfile
 import os
-import pstats
+import os
 import time
-from pstats import SortKey
-from typing import Type, Iterator, Union, Iterable
+from typing import Iterator
 
 import numpy as np
 import torch
 import torch as th
 import tqdm
-from torch import nn
-from torch._six import inf
 from torch.nn import functional as F
 from torch.nn.utils import clip_grad_norm_
 
@@ -52,7 +48,6 @@ class PPO:
             max_grad_norm=0.5,
             logger=None,
             device="cuda",
-            optimizer_class: Type[th.optim.Optimizer] = th.optim.Adam
     ):
         self.rollout_generator = rollout_generator
 
@@ -78,8 +73,35 @@ class PPO:
         self.vf_coef = vf_coef
         self.max_grad_norm = max_grad_norm
 
+        self.running_rew_mean = 0
+        self.running_rew_var = 1
+        self.running_rew_count = 1e-4
+
         self.logger = logger
         self.logger.watch((self.agent.actor, self.agent.critic))
+
+    def update_reward_norm(self, rewards: np.ndarray) -> np.ndarray:
+        batch_mean = np.mean(rewards)
+        batch_var = np.var(rewards)
+        batch_count = rewards.shape[0]
+
+        delta = batch_mean - self.running_rew_mean
+        tot_count = self.running_rew_count + batch_count
+
+        new_mean = self.running_rew_mean + delta * batch_count / tot_count
+        m_a = self.running_rew_var * self.running_rew_count
+        m_b = batch_var * batch_count
+        m_2 = m_a + m_b + np.square(delta) * self.running_rew_count * batch_count / (
+                    self.running_rew_count + batch_count)
+        new_var = m_2 / (self.running_rew_count + batch_count)
+
+        new_count = batch_count + self.running_rew_count
+
+        self.running_rew_mean = new_mean
+        self.running_rew_var = new_var
+        self.running_rew_count = new_count
+
+        return (rewards - self.running_rew_mean) / np.sqrt(self.running_rew_var + 1e-8)  # TODO normalize before update?
 
     def run(self, epochs_per_save=10, save_dir=None):
         """
@@ -103,12 +125,13 @@ class PPO:
 
             def _iter():
                 size = 0
-                progress = tqdm.tqdm(desc=f"Collecting rollouts ({epoch})", total=self.n_steps, position=0, leave=True)
+                print(f"Collecting rollouts ({epoch})...")
+                # progress = tqdm.tqdm(desc=f"Collecting rollouts ({epoch})", total=self.n_steps, position=0, leave=True)
                 while size < self.n_steps:
                     try:
                         rollout = next(rollout_gen)
                         size += rollout.size()
-                        progress.update(rollout.size())
+                        # progress.update(rollout.size())
                         yield rollout
                     except StopIteration:
                         return
@@ -145,7 +168,7 @@ class PPO:
         act_tensors = []
         # value_tensors = []
         log_prob_tensors = []
-        advantage_tensors = []
+        # advantage_tensors = []
         returns_tensors = []
         v_target_tensors = []
 
@@ -229,27 +252,14 @@ class PPO:
         # advantages_tensor = th.cat(advantage_tensors)
         returns_tensor = th.cat(returns_tensors)
 
-        # rewards_tensor = th.cat(rewards_tensors)
-        # print(th.mean(rewards_tensor).item())
-
-        # shuffle data
-        # indices = torch.randperm(advantages_tensor.shape[0])[:self.n_steps]
-        # if isinstance(obs_tensor, tuple):
-        #     obs_tensor = tuple(o[indices] for o in obs_tensor)
-        # else:
-        #     obs_tensor = obs_tensor[indices]
-        # act_tensor = act_tensor[indices]
-        # log_prob_tensor = log_prob_tensor[indices]
-        # advantages = advantages_tensor[indices]
-        # returns = returns_tensor[indices]
-
         tot_loss = 0
         tot_policy_loss = 0
         tot_entropy_loss = 0
         tot_value_loss = 0
         n = 0
 
-        pb = tqdm.tqdm(desc="Training network", total=self.epochs * self.batch_size, position=0, leave=True)
+        print("Training network...")
+        # pb = tqdm.tqdm(desc="Training network", total=self.epochs * self.batch_size, position=0, leave=True)
 
         self.agent.optimizer.zero_grad()
         for e in range(self.epochs):
@@ -313,7 +323,7 @@ class PPO:
                 tot_entropy_loss += entropy_loss.item()
                 tot_value_loss += value_loss.item()
                 n += 1
-                pb.update(self.minibatch_size)
+                # pb.update(self.minibatch_size)
 
             # Clip grad norm
             if self.max_grad_norm is not None:
@@ -363,4 +373,5 @@ class PPO:
             'critic_state_dict': self.agent.critic.state_dict(),
             # 'shared_state_dict': self.agent.shared.state_dict(),
             'optimizer_state_dict': self.agent.optimizer.state_dict(),
+            # TODO save/load reward normalization mean, std, count
         }, version_dir + "\\checkpoint.pt")

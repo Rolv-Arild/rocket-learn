@@ -1,19 +1,21 @@
 import os
 import pickle
 import time
+from collections import Counter
 from typing import Iterator
 from uuid import uuid4
 
 import msgpack
 import msgpack_numpy as m
 import numpy as np
-import matplotlib.pyplot  # noqa
+# import matplotlib.pyplot  # noqa
 import wandb
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
+# from matplotlib.axes import Axes
+# from matplotlib.figure import Figure
 from redis import Redis
 from redis.exceptions import ResponseError
 from trueskill import Rating, rate
+import plotly.graph_objs as go
 
 from rlgym.envs import Match
 from rlgym.gamelaunch import LaunchPreference
@@ -83,6 +85,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             self.redis.set(SAVE_FREQ, save_every)
             self.redis.set(QUALITY_LATEST, _serialize((0, 1)))
 
+        self.contributors = Counter()  # No need to save, clears every iteration
+
     def generate_rollouts(self) -> Iterator[ExperienceBuffer]:
         while True:
             rollout_bytes = self.redis.blpop(ROLLOUTS)[1]
@@ -91,6 +95,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             latest_version = int(self.redis.get(VERSION_LATEST))
 
             # TODO log uuid and name
+            self.contributors[name] += 1
 
             blue_players = sum(divmod(len(rollout_data), 2))
             blue, orange = [], []
@@ -138,19 +143,36 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         if ratings:
             mus = np.array([r.mu for r in ratings])
             conf = np.array([r.sigma for r in ratings])
-            fig = Figure()
-            ax: Axes = fig.subplots()
-            ax.plot(np.arange(len(ratings)), mus, color="royalblue")
-            ax.fill_between(np.arange(len(ratings)), mus + 3 * conf, mus - 3 * conf, color="lightsteelblue")
-            ax.set_xlabel("Iteration")
-            ax.set_ylabel("TrueSkill")
-            ax.set_title("Qualities")
+
+            x = np.arange(len(mus))
+            y = mus
+            y_upper = mus + 3 * conf
+            y_lower = mus - 3 * conf
+            fig = go.Figure([
+                go.Scatter(
+                    x=x,
+                    y=y,
+                    line=dict(color='rgb(0,100,80)'),
+                    mode='lines',
+                    name="mu",
+                    showlegend=False
+                ),
+                go.Scatter(
+                    x=np.concatenate((x, x[::-1])),  # x, then x reversed
+                    y=np.concatenate((y_upper, y_lower[::-1])),  # upper, then lower reversed
+                    fill='toself',
+                    fillcolor='rgba(0,100,80,0.2)',
+                    line=dict(color='rgba(255,255,255,0)'),
+                    hoverinfo="skip",
+                    name="sigma",
+                    showlegend=False
+                ),
+            ])
+
+            fig.update_layout(title="Rating", xaxis_title="Iteration", yaxis_title="TrueSkill")
 
             self.logger.log({
-                "qualities": wandb.Image(fig),
-                # "qualities": wandb.plot.line_series(np.arange(len(mus)), [mus],
-                #                                     # noqa
-                #                                     ["quality"], "Qualities", "version")
+                "qualities": fig,
             }, commit=False)
             quality = Rating(ratings[-1].mu)  # Same mu, reset sigma
         else:
@@ -171,7 +193,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         # TODO Idea: workers send name to identify who contributed rollouts,
         # keep track of top rollout contributors (each param update and total)
         # Also UID to keep track of current number of contributing workers?
-
+        print("Top contributors:\n" + "\n".join(f"{c}: {n}" for c, n in self.contributors.most_common(5)))
         n_updates = self.redis.incr(N_UPDATES) - 1
         save_freq = int(self.redis.get(SAVE_FREQ))
 

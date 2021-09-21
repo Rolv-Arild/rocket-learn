@@ -69,8 +69,8 @@ class RunningMeanStd(object):  # From sb3
         :param epsilon: helps with arithmetic issues
         :param shape: the shape of the data stream's output
         """
-        self.mean = np.zeros(shape, np.float64)
-        self.var = np.ones(shape, np.float64)
+        self.mean = 0
+        self.var = 1
         self.count = epsilon
 
     def update(self, arr: np.ndarray) -> None:
