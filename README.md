@@ -5,6 +5,7 @@ RLGym training tool
 - Add logging (✔ wandb only)
   - Give both PPO and RolloutGenerator access ✔
 - Add reward normalization (and distribution?)
+- Centralize RewardFunction
 - Model freedom
   - Multiple inputs ✔ (when obs is tuple it batches them one by one)
   - Allow shared layers
