@@ -5,14 +5,15 @@ RLGym training tool
 - Add logging (✔ wandb only)
   - Give both PPO and RolloutGenerator access ✔
 - Add reward normalization (and distribution?)
+- Centralize RewardFunction
 - Model freedom
   - Multiple inputs ✔ (when obs is tuple it batches them one by one)
-  - Allow shared layers (ex.: `PPOAgent(shared, actor, critic)`) ✔
+  - Allow shared layers
   - Recurrent?
   - Continuous actions if we really want
 - Redis features 
   - Saving and loading (put everything we need into redis and call redis.save(), figure out loading)
-  - Full setup (architecture, params, config?) communicated via redis, can start worker with only IP
+  - Full setup (architecture, params, config?) communicated via redis, can start worker with only IP (may not be feasible)
   - Version quality is most important measurement, need to log it ✔
   - Implement quality update ✔
 - Long-term plan is to set up a stream and let (at least some) people contribute with rollouts
@@ -23,6 +24,4 @@ RLGym training tool
   - See `serious.py` for suggestions
   - Need nice name for the bot
 - Known issues
-  - Invalid values in logits appear very rarely, and seemingly at random
-  - Policy update is super slow (5 mins+ using serious.py)
-  - wandb logs happen twice (or so) as often as expected
+  - Sometimes very short episodes appear (<10 frames), seemingly without any reason
