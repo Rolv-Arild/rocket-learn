@@ -4,6 +4,7 @@ import numpy as np
 import torch as th
 from torch import nn
 from torch.distributions import Categorical
+import torch.nn.functional as F
 
 from rocket_learn.agent.policy import Policy
 
@@ -38,28 +39,30 @@ class DiscretePolicy(Policy):
 
         logits = self(obs)
 
-        return [Categorical(logits=logit) for logit in logits]
+        triplets = th.stack(logits[:5])
+        duets = F.pad(th.stack(logits[5:]), pad=(0, 1), value=float("-inf"))
+        logits = th.cat((triplets, duets)).swapdims(0, 1).squeeze()
+
+        return Categorical(logits=logits)
 
     def sample_action(
             self,
-            distribution: List[Categorical],
+            distribution: Categorical,
             deterministic=False
     ):
         if deterministic:
-            action_indices = th.stack([th.argmax(dist.logits) for dist in distribution])
+            action_indices = th.argmax(distribution.logits)
         else:
-            action_indices = th.stack([dist.sample() for dist in distribution])
+            action_indices = distribution.sample()
 
         return action_indices
 
-    def log_prob(self, distribution: List[Categorical], selected_action):
-        log_prob = th.stack(
-            [dist.log_prob(action) for dist, action in zip(distribution, th.unbind(selected_action, dim=-1))],
-            dim=-1).sum(dim=-1)
+    def log_prob(self, distribution: Categorical, selected_action):
+        log_prob = distribution.log_prob(selected_action).sum(dim=-1)
         return log_prob
 
-    def entropy(self, distribution, selected_action):
-        entropy = th.stack([dist.entropy() for dist in distribution], dim=1).sum(dim=1)
+    def entropy(self, distribution: Categorical, selected_action):
+        entropy = distribution.entropy().sum(dim=-1)
         return entropy
 
     def env_compatible(self, action):

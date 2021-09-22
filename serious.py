@@ -256,8 +256,8 @@ class Necto(nn.Module):  # Wraps earl + an output and takes only a single input
         q, kv, m = inp
         res = self.output(self.earl(q, kv, m))
         if isinstance(res, tuple):
-            return tuple(torch.squeeze(r) for r in res)
-        return torch.squeeze(res)
+            return tuple(r for r in res)
+        return res
 
 
 def make_worker(host, name, limit_threads=True):
@@ -279,7 +279,7 @@ if __name__ == "__main__":
 
     redis = Redis(password="rocket-learn")
     redis.delete(WORKER_COUNTER)  # Reset to 0
-    rollout_gen = RedisRolloutGenerator(redis, save_every=10, logger=logger)
+    rollout_gen = RedisRolloutGenerator(redis, save_every=1, logger=logger)
 
     # jit models can't be pickled
     # ex_inp = (
@@ -308,9 +308,9 @@ if __name__ == "__main__":
     alg = PPO(
         rollout_gen,
         agent,
-        n_steps=1_000_000,
-        batch_size=20_000,
-        minibatch_size=10_000,
+        n_steps=1_00_000,
+        batch_size=2_000,
+        # minibatch_size=20_000,
         epochs=50,
         gamma=0.995,
         logger=logger,
@@ -319,4 +319,4 @@ if __name__ == "__main__":
     log_dir = "E:\\log_directory\\"
     repo_dir = "E:\\repo_directory\\"
 
-    alg.run(epochs_per_save=10)
+    alg.run(epochs_per_save=1)
