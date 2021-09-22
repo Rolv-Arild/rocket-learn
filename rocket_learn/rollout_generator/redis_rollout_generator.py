@@ -72,7 +72,6 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
     """
 
     def __init__(self, redis: Redis, save_every=10, logger=None, clear=True):
-        # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.redis = redis
         self.logger = logger
 
@@ -95,14 +94,14 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             latest_version = int(self.redis.get(VERSION_LATEST))
 
             # TODO log uuid and name
-            self.contributors[name] += 1
+            self.contributors[name] += len(rollout_data)
 
             blue_players = sum(divmod(len(rollout_data), 2))
             blue, orange = [], []
             rollouts = []
             for n, (rollout, version) in enumerate(rollout_data):
                 if version < 0:
-                    if version == latest_version:
+                    if abs(version - latest_version) <= 1:
                         rollout = ExperienceBuffer(None, *rollout)
                         rollouts.append(rollout)
                         rating = Rating(*_unserialize(self.redis.get(QUALITY_LATEST)))
@@ -111,16 +110,14 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                 else:
                     rating = Rating(*_unserialize(self.redis.lindex(QUALITIES, version)))
 
-                if n < blue_players:
+                if n < blue_players:  # First half of players is blue side
                     blue.append(rating)
                 else:
                     orange.append(rating)
             else:  # Latest version is not outdated
-                if result >= 0:
-                    r1, r2 = rate((blue, orange), ranks=(0, result))
-                else:
-                    r2, r1 = rate((orange, blue))
-
+                r1, r2 = rate((blue, orange), ranks=(0, result))  # In ranks lowest number is best, result=-1 is orange win, 0 tie, 1 blue
+                
+                # Some trickery to handle same rating apearing multiple times, we just average their mus and sigmas
                 versions = {}
                 for rating, (rollout, version) in zip(r1 + r2, rollout_data):
                     versions.setdefault(version, []).append(rating)
@@ -130,7 +127,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                                         (sum(r.sigma for r in ratings) / len(ratings)))
                     if version > 0:  # Old
                         self.redis.lset(QUALITIES, version, _serialize(tuple(avg_rating)))
-                    elif abs(version - latest_version) <= 1:
+                    elif version == latest_version:
                         self.redis.set(QUALITY_LATEST, _serialize(tuple(avg_rating)))
 
                 yield from rollouts
@@ -194,6 +191,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         # keep track of top rollout contributors (each param update and total)
         # Also UID to keep track of current number of contributing workers?
         print("Top contributors:\n" + "\n".join(f"{c}: {n}" for c, n in self.contributors.most_common(5)))
+        self.contributors.clear()
+        
         n_updates = self.redis.incr(N_UPDATES) - 1
         save_freq = int(self.redis.get(SAVE_FREQ))
 
@@ -232,7 +231,7 @@ class RedisRolloutWorker:
     def _get_opponent_index(self):
         # Get qualities
         # TODO do multiple selections at once
-        # sum priorities to have higher chance of selecting low sigma
+        # sum priorities to have higher chance of selecting high sigma
         qualities = np.asarray([sum(_unserialize(v)) for v in self.redis.lrange(QUALITIES, 0, -1)])
         # Pick opponent
         probs = softmax(qualities / np.log(10))
