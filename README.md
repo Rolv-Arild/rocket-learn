@@ -4,6 +4,7 @@ RLGym training tool
 ## TODO
 - Add logging (✔ wandb only)
   - Give both PPO and RolloutGenerator access ✔
+  - Also normal logging instead of prints
 - Add reward normalization (and distribution?)
 - Centralize RewardFunction
 - Model freedom
