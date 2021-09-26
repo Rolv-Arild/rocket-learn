@@ -1,5 +1,5 @@
 import os
-import pickle
+import cloudpickle as pickle
 import time
 from collections import Counter
 from typing import Iterator
@@ -143,8 +143,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
 
             x = np.arange(len(mus))
             y = mus
-            y_upper = mus + 3 * conf
-            y_lower = mus - 3 * conf
+            y_upper = mus + 2 * conf
+            y_lower = mus - 2 * conf
             fig = go.Figure([
                 go.Scatter(
                     x=x,
@@ -210,7 +210,7 @@ class RedisRolloutWorker:
     Provides RedisRolloutGenerator with rollouts via a Redis server
     """
 
-    def __init__(self, redis: Redis, name: str, match: Match, current_version_prob=.9):
+    def __init__(self, redis: Redis, name: str, match: Match, current_version_prob=.9, display_only=False):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -227,6 +227,7 @@ class RedisRolloutWorker:
         self.env = Gym(match=self.match, pipe_id=os.getpid(), launch_preference=LaunchPreference.EPIC_LOGIN_TRICK,
                        use_injector=True)
         self.n_agents = self.match.agents
+        self.display_only = display_only
 
     def _get_opponent_index(self):
         # Get qualities
@@ -287,4 +288,5 @@ class RedisRolloutWorker:
                     version
                 ))
 
-            self.redis.rpush(ROLLOUTS, _serialize((rollout_data, self.uuid, self.name, result)))
+            if not self.display_only:
+                self.redis.rpush(ROLLOUTS, _serialize((rollout_data, self.uuid, self.name, result)))
