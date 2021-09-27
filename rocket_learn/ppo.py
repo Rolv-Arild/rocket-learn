@@ -1,5 +1,4 @@
 import os
-import os
 import time
 from typing import Iterator
 
@@ -56,7 +55,7 @@ class PPO:
         self.agent = agent.to(device)
         self.device = device
 
-        self.starting_epoch = 0
+        self.starting_iteration = 0
 
         # hyperparameters
         self.epochs = epochs
@@ -103,20 +102,20 @@ class PPO:
 
         return (rewards - self.running_rew_mean) / np.sqrt(self.running_rew_var + 1e-8)  # TODO normalize before update?
 
-    def run(self, epochs_per_save=10, save_dir=None):
+    def run(self, iterations_per_save=10, save_dir=None):
         """
         Generate rollout data and train
-        :param epochs_per_save: number of epochs between checkpoint saves
+        :param iterations_per_save: number of iterations between checkpoint saves
         :param save_dir: where to save
         """
         if save_dir:
             current_run_dir = os.path.join(save_dir, self.logger.project + "_" + str(time.time()))
             os.makedirs(current_run_dir)
-        elif epochs_per_save and not save_dir:
+        elif iterations_per_save and not save_dir:
             print("Warning: no save directory specified.")
             print("Checkpoints will not be saved.")
 
-        epoch = self.starting_epoch
+        iteration = self.starting_iteration
         rollout_gen = self.rollout_generator.generate_rollouts()
 
         while True:
@@ -125,8 +124,8 @@ class PPO:
 
             def _iter():
                 size = 0
-                print(f"Collecting rollouts ({epoch})...")
-                # progress = tqdm.tqdm(desc=f"Collecting rollouts ({epoch})", total=self.n_steps, position=0, leave=True)
+                print(f"Collecting rollouts ({iteration})...")
+                # progress = tqdm.tqdm(desc=f"Collecting rollouts ({iteration})", total=self.n_steps, position=0, leave=True)
                 while size < self.n_steps:
                     try:
                         rollout = next(rollout_gen)
@@ -136,13 +135,13 @@ class PPO:
                     except StopIteration:
                         return
 
-            self.calculate(_iter())
-            epoch += 1
+            self.calculate(_iter(), iteration)
+            iteration += 1
             t1 = time.time()
             self.logger.log({"fps": self.n_steps / (t1 - t0)})
 
-            if save_dir and epoch % epochs_per_save == 0:
-                self.save(current_run_dir, epoch)  # noqa
+            if save_dir and iteration % iterations_per_save == 0:
+                self.save(current_run_dir, iteration)  # noqa
 
     def set_logger(self, logger):
         self.logger = logger
@@ -160,7 +159,7 @@ class PPO:
         entropy = -torch.mean(entropy)
         return log_prob, entropy
 
-    def calculate(self, buffers: Iterator[ExperienceBuffer]):
+    def calculate(self, buffers: Iterator[ExperienceBuffer], iteration):
         """
         Calculate loss and update network
         """
@@ -240,7 +239,7 @@ class PPO:
             "ep_reward_mean": ep_rewards.mean(),
             "ep_reward_std": ep_rewards.std(),
             "ep_len_mean": ep_steps.mean(),
-        }, commit=False)
+        }, step=iteration, commit=False)
 
         if isinstance(obs_tensors[0], tuple):
             transposed = zip(*obs_tensors)
@@ -259,7 +258,6 @@ class PPO:
         n = 0
 
         print("Training network...")
-        # pb = tqdm.tqdm(desc="Training network", total=self.epochs * self.batch_size, position=0, leave=True)
 
         self.agent.optimizer.zero_grad()
         for e in range(self.epochs):
@@ -337,13 +335,13 @@ class PPO:
             "policy_loss": tot_policy_loss / n,
             "entropy_loss": tot_entropy_loss / n,
             "value_loss": tot_value_loss / n,
-        }, commit=False)  # Is committed after when calculating fps
+        }, step=iteration, commit=False)  # Is committed after when calculating fps
 
-    def load(self, load_location):
+    def load(self, load_location, continue_iterations=True):
         """
         load the model weights, optimizer values, and metadata
         :param load_location: checkpoint folder to read
-        :return:
+        :param continue_iterations: keep the same training steps
         """
 
         checkpoint = torch.load(load_location)
@@ -351,15 +349,16 @@ class PPO:
         self.agent.critic.load_state_dict(checkpoint['critic_state_dict'])
         # self.agent.shared.load_state_dict(checkpoint['shared_state_dict'])
         self.agent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.starting_epoch = checkpoint['epoch']
-
-        print("Continuing training at epoch " + str(self.starting_epoch))
+        
+        if continue_iterations:
+            self.starting_iteration = checkpoint['epoch']    
+            print("Continuing training at iteration " + str(self.starting_iteration))
 
     def save(self, save_location, current_step):
         """
         Save the model weights, optimizer values, and metadata
         :param save_location: where to save
-        :param epoch: the current epoch when saved. Use to later continue training
+        :param current_step: the current iteration when saved. Use to later continue training
         """
 
         version_str = str(self.logger.project) + "_" + str(current_step)
