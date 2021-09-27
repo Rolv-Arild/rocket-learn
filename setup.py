@@ -14,7 +14,7 @@ setup(
    description='Rocket Learn',
    author=['Rolv Arild', 'Daniel Downs'],
    url='https://github.com/Rolv-Arild/rocket-learn',
-   packages=package for package in find_packages() if package.startswith("rocket_learn"),
+   packages=[package for package in find_packages() if package.startswith("rocket_learn")],
    long_description=long_description,
    install_requires=['gym', 'torch', 'tqdm', 'trueskill', 'msgpack_numpy', 'wandb'],
 )
