@@ -1,7 +1,9 @@
-from typing import List, Tuple
+from typing import List
 
 import numpy as np
+import torch
 import torch.distributions
+from torch import nn
 
 from rlgym.gym import Gym
 from rocket_learn.agent.policy import Policy
@@ -52,7 +54,10 @@ def generate_episode(env: Gym, policies: List[Policy]) -> (List[ExperienceBuffer
             for i in range(len(policies)):
                 ep_rews[i] += rewards[i]
 
-    return rollouts, info["result"]
+    result = info["result"]
+    # result = 0 if abs(info["state"].ball.position[1]) < BALL_RADIUS else (2 * (info["state"].ball.position[1] > 0) - 1)
+
+    return rollouts, result
 
 
 def softmax(x):
@@ -61,36 +66,13 @@ def softmax(x):
     return e_x / e_x.sum()
 
 
-class RunningMeanStd(object):  # From sb3
-    def __init__(self, epsilon: float = 1e-4, shape: Tuple[int, ...] = ()):
-        """
-        Calulates the running mean and std of a data stream
-        https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Parallel_algorithm
-        :param epsilon: helps with arithmetic issues
-        :param shape: the shape of the data stream's output
-        """
-        self.mean = 0
-        self.var = 1
-        self.count = epsilon
+class SplitLayer(nn.Module):
+    def __init__(self, splits=None):
+        super().__init__()
+        if splits is not None:
+            self.splits = splits
+        else:
+            self.splits = (3, 3, 3, 3, 3, 2, 2, 2)
 
-    def update(self, arr: np.ndarray) -> None:
-        batch_mean = np.mean(arr, axis=0)
-        batch_var = np.var(arr, axis=0)
-        batch_count = arr.shape[0]
-        self.update_from_moments(batch_mean, batch_var, batch_count)
-
-    def update_from_moments(self, batch_mean: np.ndarray, batch_var: np.ndarray, batch_count: int) -> None:
-        delta = batch_mean - self.mean
-        tot_count = self.count + batch_count
-
-        new_mean = self.mean + delta * batch_count / tot_count
-        m_a = self.var * self.count
-        m_b = batch_var * batch_count
-        m_2 = m_a + m_b + np.square(delta) * self.count * batch_count / (self.count + batch_count)
-        new_var = m_2 / (self.count + batch_count)
-
-        new_count = batch_count + self.count
-
-        self.mean = new_mean
-        self.var = new_var
-        self.count = new_count
+    def forward(self, x):
+        return torch.split(x, self.splits, dim=-1)

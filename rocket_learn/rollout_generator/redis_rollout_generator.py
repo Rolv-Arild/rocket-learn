@@ -1,4 +1,6 @@
 import os
+from threading import Thread
+
 import cloudpickle as pickle
 import time
 from collections import Counter
@@ -93,8 +95,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             rollout_data, uuid, name, result = _unserialize(rollout_bytes)
             latest_version = int(self.redis.get(VERSION_LATEST))
 
-            # TODO log uuid and name
-            self.contributors[name] += len(rollout_data)
+            # TODO log uuid?
 
             blue_players = sum(divmod(len(rollout_data), 2))
             blue, orange = [], []
@@ -103,6 +104,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                 if version < 0:
                     if abs(version - latest_version) <= 1:
                         rollout = ExperienceBuffer(None, *rollout)
+                        self.contributors[name] += rollout.size()
                         rollouts.append(rollout)
                         rating = Rating(*_unserialize(self.redis.get(QUALITY_LATEST)))
                     else:
@@ -115,8 +117,9 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                 else:
                     orange.append(rating)
             else:  # Latest version is not outdated
-                r1, r2 = rate((blue, orange), ranks=(0, result))  # In ranks lowest number is best, result=-1 is orange win, 0 tie, 1 blue
-                
+                r1, r2 = rate((blue, orange), ranks=(
+                    0, result))  # In ranks lowest number is best, result=-1 is orange win, 0 tie, 1 blue
+
                 # Some trickery to handle same rating apearing multiple times, we just average their mus and sigmas
                 versions = {}
                 for rating, (rollout, version) in zip(r1 + r2, rollout_data):
@@ -143,7 +146,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
 
             x = np.arange(len(mus))
             y = mus
-            y_upper = mus + 2 * conf
+            y_upper = mus + 2 * conf  # 95% confidence
             y_lower = mus - 2 * conf
             fig = go.Figure([
                 go.Scatter(
@@ -158,7 +161,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                     x=np.concatenate((x, x[::-1])),  # x, then x reversed
                     y=np.concatenate((y_upper, y_lower[::-1])),  # upper, then lower reversed
                     fill='toself',
-                    fillcolor='rgba(0,100,80,0.2)',
+                    fillcolor='rgba(0,100,80,0.2)',  # TODO same color as wandb run?
                     line=dict(color='rgba(255,255,255,0)'),
                     hoverinfo="skip",
                     name="sigma",
@@ -191,8 +194,12 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         # keep track of top rollout contributors (each param update and total)
         # Also UID to keep track of current number of contributing workers?
         print("Top contributors:\n" + "\n".join(f"{c}: {n}" for c, n in self.contributors.most_common(5)))
+        self.logger.log({
+            "contributors": wandb.Table(columns=["name", "steps"], data=self.contributors.most_common())},
+            commit=False
+        )
         self.contributors.clear()
-        
+
         n_updates = self.redis.incr(N_UPDATES) - 1
         save_freq = int(self.redis.get(SAVE_FREQ))
 
@@ -229,15 +236,14 @@ class RedisRolloutWorker:
         self.n_agents = self.match.agents
         self.display_only = display_only
 
-    def _get_opponent_index(self):
+    def _get_opponent_indices(self, n):
         # Get qualities
-        # TODO do multiple selections at once
         # sum priorities to have higher chance of selecting high sigma
         qualities = np.asarray([sum(_unserialize(v)) for v in self.redis.lrange(QUALITIES, 0, -1)])
         # Pick opponent
         probs = softmax(qualities / np.log(10))
-        index = np.random.choice(len(probs), p=probs)
-        return index, probs[index]
+        indices = np.random.choice(len(probs), n, p=probs)
+        return indices
 
     def run(self):  # Mimics Thread
         """
@@ -258,35 +264,38 @@ class RedisRolloutWorker:
             self.current_agent = updated_agent
 
             # TODO customizable past agent selection, should team only be same agent?
-            agents = [(self.current_agent, latest_version, self.current_version_prob)]  # Use at least one current agent
+            agents = [(self.current_agent, latest_version)]  # Use at least one current agent
 
             if self.n_agents > 1:
                 # Ensure final proportion is same
                 adjusted_prob = (self.current_version_prob * self.n_agents - 1) / (self.n_agents - 1)
-                for i in range(self.n_agents - 1):
-                    is_current = np.random.random() < adjusted_prob
-                    if not is_current:
-                        index, prob = self._get_opponent_index()
-                        version = index
-                        selected_agent = _unserialize_model(self.redis.lindex(OPPONENT_MODELS, index))
-                    else:
-                        prob = self.current_version_prob
-                        version = latest_version
-                        selected_agent = self.current_agent
+                n_old = np.random.binomial(n=self.n_agents - 1, p=1 - adjusted_prob)
+                n_new = self.n_agents - n_old - 1
+                old_versions = self._get_opponent_indices(n_old)
+                for _ in range(n_new):
+                    version = latest_version
+                    selected_agent = self.current_agent
+                    agents.append((selected_agent, version))
 
-                    agents.append((selected_agent, version, prob))
+                for index in old_versions:
+                    version = int(index)
+                    selected_agent = _unserialize_model(self.redis.lindex(OPPONENT_MODELS, version))
+                    agents.append((selected_agent, version))
 
             np.random.shuffle(agents)
-            print("Generating rollout with versions:", [v for a, v, p in agents])
+            print("Generating rollout with versions:", [v for a, v in agents])
 
-            rollouts, result = util.generate_episode(self.env, [agent for agent, version, prob in agents])
+            rollouts, result = util.generate_episode(self.env, [agent for agent, version in agents])
 
             rollout_data = []
-            for rollout, (agent, version, prob) in zip(rollouts, agents):
+            for rollout, (agent, version) in zip(rollouts, agents):
                 rollout_data.append((
                     (rollout.observations, rollout.actions, rollout.rewards, rollout.dones, rollout.log_prob),
                     version
                 ))
 
             if not self.display_only:
-                self.redis.rpush(ROLLOUTS, _serialize((rollout_data, self.uuid, self.name, result)))
+                rollout_data = _serialize((rollout_data, self.uuid, self.name, result))
+                Thread(
+                    target=lambda: self.redis.rpush(ROLLOUTS, rollout_data)
+                ).run()
