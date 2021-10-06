@@ -19,10 +19,8 @@ RLGym training tool
   - Implement quality update ✔
 - Long-term plan is to set up a stream and let (at least some) people contribute with rollouts
   - Keep track of who is contributing ✔, make on-screen leaderboards
-  - Exact setup should probably be in different repo
+  - Exact setup in [different repo](https://github.com/Rolv-Arild/Necto)
   - Rolv can keep it running on current PC, planning to get new one
   - Need to come to agreement on config (architecture, reward func, parameters etc.)
-  - See `serious.py` for suggestions
-  - Need nice name for the bot
 - Known issues
   - Sometimes very short episodes appear (<10 frames), seemingly without any reason
