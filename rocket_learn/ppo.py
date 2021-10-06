@@ -117,10 +117,11 @@ class PPO:
 
         iteration = self.starting_iteration
         rollout_gen = self.rollout_generator.generate_rollouts()
+        
+        self.rollout_generator.update_parameters(self.agent.actor)
 
         while True:
             t0 = time.time()
-            self.rollout_generator.update_parameters(self.agent.actor)
 
             def _iter():
                 size = 0
@@ -137,11 +138,15 @@ class PPO:
 
             self.calculate(_iter(), iteration)
             iteration += 1
+            
+            if save_dir and iteration % iterations_per_save == 0:
+                self.save(current_run_dir, iteration)  # noqa
+            
+            self.rollout_generator.update_parameters(self.agent.actor)
+            
             t1 = time.time()
             self.logger.log({"fps": self.n_steps / (t1 - t0)})
 
-            if save_dir and iteration % iterations_per_save == 0:
-                self.save(current_run_dir, iteration)  # noqa
 
     def set_logger(self, logger):
         self.logger = logger
