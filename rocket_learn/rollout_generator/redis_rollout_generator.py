@@ -22,6 +22,7 @@ import plotly.graph_objs as go
 from rlgym.envs import Match
 from rlgym.gamelaunch import LaunchPreference
 from rlgym.gym import Gym
+from rlgym.utils.gamestates import GameState
 from rocket_learn.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
 from rocket_learn.utils import util
@@ -250,6 +251,8 @@ class RedisRolloutWorker:
         begin processing in already launched match and push to redis
         """
         n = 0
+        t = Thread()
+        t.start()
         while True:
             model_bytes = self.redis.get(MODEL_LATEST)
             latest_version = self.redis.get(VERSION_LATEST)
@@ -293,9 +296,8 @@ class RedisRolloutWorker:
                     (rollout.observations, rollout.actions, rollout.rewards, rollout.dones, rollout.log_prob),
                     version
                 ))
-
             if not self.display_only:
                 rollout_data = _serialize((rollout_data, self.uuid, self.name, result))
-                Thread(
-                    target=lambda: self.redis.rpush(ROLLOUTS, rollout_data)
-                ).start()
+                t.join()
+                t = Thread(target=lambda: self.redis.rpush(ROLLOUTS, rollout_data))
+                t.start()
