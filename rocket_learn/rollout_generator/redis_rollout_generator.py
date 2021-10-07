@@ -298,4 +298,4 @@ class RedisRolloutWorker:
                 rollout_data = _serialize((rollout_data, self.uuid, self.name, result))
                 Thread(
                     target=lambda: self.redis.rpush(ROLLOUTS, rollout_data)
-                ).run()
+                ).start()
