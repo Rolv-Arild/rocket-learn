@@ -1,8 +1,10 @@
 from typing import List
 
 import numpy as np
+import rlgym
 import torch
 import torch.distributions
+from rlgym.gamelaunch import LaunchPreference
 from torch import nn
 
 from rlgym.gym import Gym
@@ -79,36 +81,32 @@ class SplitLayer(nn.Module):
         return torch.split(x, self.splits, dim=-1)
 
 
-def _encode_player(pd: PlayerData):
-    return np.concatenate((
-        _encode_physics_object(pd.car_data),
-        _encode_physics_object(pd.inverted_car_data),
-        np.array([
-            pd.match_goals, pd.match_saves, pd.match_shots, pd.match_demolishes,
-            pd.boost_pickups, pd.is_demoed, pd.on_ground, pd.ball_touched,
-            pd.has_flip, pd.boost_amount, pd.car_data, pd.team_num
-        ])
-    ))
-
-
-def _encode_physics_object(po: PhysicsObject):
-    return np.concatenate((
-        po.position,
-        po.quaternion,
-        po.linear_velocity,
-        po.angular_velocity
-    ))
-
-
 def encode_gamestate(state: GameState):
-    return np.concatenate(
-        (
-            np.array([np.nan, state.blue_score, state.orange_score]),
-            state.boost_pads,
-            _encode_physics_object(state.ball),
-            _encode_physics_object(state.inverted_ball)
-        ) +
-        tuple(
-            _encode_player(p) for p in state.players
-        )
-    )
+    state_vals = [0, state.blue_score, state.orange_score]
+    state_vals += state.boost_pads.tolist()
+
+    for bd in (state.ball, state.inverted_ball):
+        state_vals += bd.position.tolist()
+        state_vals += bd.linear_velocity.tolist()
+        state_vals += bd.angular_velocity.tolist()
+
+    for p in state.players:
+        state_vals += [p.car_id, p.team_num]
+        for cd in (p.car_data, p.inverted_car_data):
+            state_vals += cd.position.tolist()
+            state_vals += cd.quaternion.tolist()
+            state_vals += cd.linear_velocity.tolist()
+            state_vals += cd.angular_velocity.tolist()
+        state_vals += [
+            p.match_goals,
+            p.match_saves,
+            p.match_shots,
+            p.match_demolishes,
+            p.boost_pickups,
+            p.is_demoed,
+            p.on_ground,
+            p.ball_touched,
+            p.has_flip,
+            p.boost_amount
+        ]
+    return state_vals
