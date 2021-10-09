@@ -190,11 +190,9 @@ class PPO:
                 obs_tensor = th.as_tensor(np.stack(buffer.observations)).float()
             # obs_tensor = th.as_tensor(np.stack(buffer.observations)).float()
             act_tensor = th.as_tensor(np.stack(buffer.actions))
-            log_prob_tensor = th.as_tensor(np.stack(buffer.log_prob))
+            # log_prob_tensor = th.as_tensor(np.stack(buffer.log_prob))
             rew_tensor = th.as_tensor(np.stack(buffer.rewards))
             done_tensor = th.as_tensor(np.stack(buffer.dones))
-
-            log_prob_tensor.detach_()  # Unnecessary?
 
             size = rew_tensor.size()[0]
             advantages = th.zeros((size,), dtype=th.float)
@@ -209,6 +207,10 @@ class PPO:
                 else:
                     x = obs_tensor.to(self.device)
                 values = self.agent.critic(x).detach().cpu().numpy().flatten()  # No batching?
+
+                dist = self.agent.actor.get_action_distribution(x)
+                log_prob_tensor = self.agent.actor.log_prob(dist, act_tensor.to(self.device)).detach().cpu().flatten()
+
                 last_values = values[-1]
                 last_gae_lam = 0
                 for step in reversed(range(size)):
