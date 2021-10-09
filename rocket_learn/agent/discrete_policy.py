@@ -68,4 +68,4 @@ class DiscretePolicy(Policy):
     def env_compatible(self, action):
         if isinstance(action, th.Tensor):
             action = action.numpy()
-        return self.index_action_map[np.arange(len(self.index_action_map)), action]
+        return self.index_action_map[np.arange(len(self.index_action_map)), action.astype(int)]

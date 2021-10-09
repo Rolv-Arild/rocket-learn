@@ -1,4 +1,5 @@
 import os
+from concurrent.futures import ProcessPoolExecutor
 from threading import Thread
 
 import cloudpickle as pickle
@@ -14,6 +15,7 @@ import numpy as np
 import wandb
 # from matplotlib.axes import Axes
 # from matplotlib.figure import Figure
+from gym.vector.utils import CloudpickleWrapper
 from redis import Redis
 from redis.exceptions import ResponseError
 from rlgym.utils import ObsBuilder, RewardFunction
@@ -98,73 +100,104 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             self.redis.set(QUALITY_LATEST, _serialize((0, 1)))
 
         self.contributors = Counter()  # No need to save, clears every iteration
-        self.obs_build_factory = obs_build_factory
-        self.rew_build_factory = rew_build_factory
+        self.obs_build_func = obs_build_factory
+        self.rew_build_func = rew_build_factory
+
+    @staticmethod
+    def _process_rollout(rollout_bytes, latest_version, policy, obs_build_func, rew_build_func):
+        rollout_data, uuid, name, result = _unserialize(rollout_bytes)
+
+        # TODO log uuid?
+
+        gamestates, actions, versions = rollout_data
+        if not any(version < 0 and abs(version - latest_version) <= 1 for version in versions):
+            return
+
+        gamestates = [GameState(gs) for gs in gamestates]
+        obs_builder = obs_build_func()
+        rew_func = rew_build_func()
+        obs_builder.reset(gamestates[0])
+        rew_func.reset(gamestates[0])
+        buffers = [
+            ExperienceBuffer()
+            for _ in range(len(gamestates[0].players))
+        ]
+        last_actions = np.zeros((len(gamestates[0].players), 8))
+        for s, gs in enumerate(gamestates):
+            final = s == len(gamestates) - 1
+            for i, player in enumerate(gs.players):
+                if s > 0:
+                    prev_act = policy.env_compatible(last_actions[i])
+                else:
+                    prev_act = np.zeros(8)
+                obs = obs_builder.build_obs(player, gs, prev_act)
+                if final:
+                    rew = rew_func.get_final_reward(player, gs, prev_act)
+                else:
+                    rew = rew_func.get_reward(player, gs, prev_act)
+                buffers[i].add_step(obs, actions[i][s], rew, final, None)
+                last_actions[i, :] = actions[i][s]
+
+        return buffers, versions, uuid, name, result  # relevant_buffers
+
+    def _update_ratings(self, name, versions, buffers, latest_version, result):
+        ratings = []
+        relevant_buffers = []
+        for version, buffer in zip(versions, buffers):
+            if version < 0 and abs(version - latest_version) <= 1:
+                rating = Rating(*_unserialize(self.redis.get(QUALITY_LATEST)))
+                relevant_buffers.append(buffer)
+                self.contributors[name] += buffer.size()
+            else:
+                rating = Rating(*_unserialize(self.redis.lindex(QUALITIES, version)))
+            ratings.append(rating)
+
+        blue_players = sum(divmod(len(ratings), 2))
+        blue, orange = ratings[:blue_players], ratings[blue_players:]
+
+        # In ranks lowest number is best, result=-1 is orange win, 0 tie, 1 blue
+        r1, r2 = rate((blue, orange), ranks=(0, result))
+
+        # Some trickery to handle same rating appearing multiple times, we just average their new mus and sigmas
+        versions = {}
+        for rating, version in zip(r1 + r2, versions):
+            versions.setdefault(version, []).append(rating)
+
+        for version, ratings in versions.items():
+            avg_rating = Rating((sum(r.mu for r in ratings) / len(ratings)),
+                                (sum(r.sigma for r in ratings) / len(ratings)))
+            if version > 0:  # Old
+                self.redis.lset(QUALITIES, version, _serialize(tuple(avg_rating)))
+            elif version == latest_version:
+                self.redis.set(QUALITY_LATEST, _serialize(tuple(avg_rating)))
+
+        return relevant_buffers
 
     def generate_rollouts(self) -> Iterator[ExperienceBuffer]:
-        while True:
-            rollout_bytes = self.redis.blpop(ROLLOUTS)[1]
-
-            rollout_data, uuid, name, result = _unserialize(rollout_bytes)
-            latest_version = int(self.redis.get(VERSION_LATEST))
-
-            # TODO log uuid?
-
-            gamestates, actions, versions = rollout_data
-            if not any(version < 0 and abs(version - latest_version) <= 1 for version in versions):
-                continue
-
-            gamestates = [GameState(gs) for gs in gamestates]
-            obs_builder = self.obs_build_factory()
-            rew_func = self.rew_build_factory()
-            obs_builder.reset(gamestates[0])
-            rew_func.reset(gamestates[0])
-            buffers = [
-                ExperienceBuffer()
-                for _ in range(len(gamestates[0].players))
-            ]
-            last_actions = np.zeros((len(gamestates[0].players), 8))
-            for s, gs in enumerate(gamestates):
-                final = s == len(gamestates) - 1
-                for i, player in enumerate(gs.players):
-                    obs = obs_builder.build_obs(player, gs, last_actions[i])
-                    if final:
-                        rew = rew_func.get_final_reward(player, gs, last_actions[i])
-                    else:
-                        rew = rew_func.get_reward(player, gs, last_actions[i])
-                    buffers[i].add_step(obs, actions[i][s], rew, final, None)
-                    last_actions[i, :] = actions[i][s]
-
-            ratings = []
-            relevant_buffers = []
-            for version, buffer in zip(versions, buffers):
-                if version < 0 and abs(version - latest_version) <= 1:
-                    rating = Rating(*_unserialize(self.redis.get(QUALITY_LATEST)))
-                    relevant_buffers.append(buffer)
-                else:
-                    rating = Rating(*_unserialize(self.redis.lindex(QUALITIES, version)))
-                ratings.append(rating)
-
-            blue_players = sum(divmod(len(gamestates[0].players), 2))
-            blue, orange = ratings[:blue_players], ratings[blue_players:]
-
-            # In ranks lowest number is best, result=-1 is orange win, 0 tie, 1 blue
-            r1, r2 = rate((blue, orange), ranks=(0, result))
-
-            # Some trickery to handle same rating apearing multiple times, we just average their mus and sigmas
-            versions = {}
-            for rating, version in zip(r1 + r2, versions):
-                versions.setdefault(version, []).append(rating)
-
-            for version, ratings in versions.items():
-                avg_rating = Rating((sum(r.mu for r in ratings) / len(ratings)),
-                                    (sum(r.sigma for r in ratings) / len(ratings)))
-                if version > 0:  # Old
-                    self.redis.lset(QUALITIES, version, _serialize(tuple(avg_rating)))
-                elif version == latest_version:
-                    self.redis.set(QUALITY_LATEST, _serialize(tuple(avg_rating)))
-
-            yield from relevant_buffers
+        # while True:
+        #     relevant_buffers = self._process_rollout()
+        #     if relevant_buffers is not None:
+        #         yield from relevant_buffers
+        futures = []
+        with ProcessPoolExecutor() as ex:
+            while True:
+                # Kinda scuffed ngl
+                latest_version = int(self.redis.get(VERSION_LATEST))
+                if len(futures) > 0 and futures[0].done():
+                    res = futures.pop(0).result()
+                    if res is not None:
+                        buffers, versions, uuid, name, result = res
+                        relevant_buffers = self._update_ratings(name, versions, buffers, latest_version, result)
+                        yield from relevant_buffers
+                elif len(futures) < os.cpu_count():
+                    futures.append(ex.submit(
+                        RedisRolloutGenerator._process_rollout,
+                        self.redis.blpop(ROLLOUTS)[1],
+                        latest_version,
+                        _unserialize_model(self.redis.get(MODEL_LATEST)),
+                        CloudpickleWrapper(self.obs_build_func),
+                        CloudpickleWrapper(self.rew_build_func)
+                    ))
 
     def _add_opponent(self, agent):
         # Add to list
