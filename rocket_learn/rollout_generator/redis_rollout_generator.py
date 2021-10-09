@@ -281,20 +281,28 @@ class RedisRolloutWorker:
         begin processing in already launched match and push to redis
         """
         n = 0
+        latest_version = None
         t = Thread()
         t.start()
         while True:
-            model_bytes = self.redis.get(MODEL_LATEST)
-            latest_version = self.redis.get(VERSION_LATEST)
-            if model_bytes is None:
+            # Get the most recent version available
+            available_version = self.redis.get(VERSION_LATEST)
+            if available_version is None:
                 time.sleep(1)
-                continue  # Wait for model to get published
-            updated_agent = _unserialize_model(model_bytes)
-            latest_version = int(latest_version)
-
+                continue  # Wait for version to be published (not sure if this is necessary?)
+            available_version = int(available_version)
+                
+            # Only try to download latest version when new
+            if latest_version != available_version:  
+                model_bytes = self.redis.get(MODEL_LATEST)
+                if model_bytes is None:
+                    time.sleep(1)
+                    continue  # This is maybe not necessary? Can't hurt to leave it in.
+                latest_version = available_version
+                updated_agent = _unserialize_model(model_bytes)
+                self.current_agent = updated_agent
+            
             n += 1
-
-            self.current_agent = updated_agent
 
             # TODO customizable past agent selection, should team only be same agent?
             agents = [(self.current_agent, latest_version)]  # Use at least one current agent
