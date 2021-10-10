@@ -109,7 +109,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
 
         # TODO log uuid?
 
-        gamestates, actions, versions = rollout_data
+        gamestates, actions, log_probs, versions = rollout_data
         if not any(version < 0 and abs(version - latest_version) <= 1 for version in versions):
             return
 
@@ -135,7 +135,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                     rew = rew_func.get_final_reward(player, gs, prev_act)
                 else:
                     rew = rew_func.get_reward(player, gs, prev_act)
-                buffers[i].add_step(obs, actions[i][s], rew, final, None)
+                buffers[i].add_step(obs, actions[i][s], rew, final, log_probs[i][s], None)
                 last_actions[i, :] = actions[i][s]
 
         return buffers, versions, uuid, name, result  # relevant_buffers
@@ -182,14 +182,16 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         with ProcessPoolExecutor() as ex:
             while True:
                 # Kinda scuffed ngl
-                latest_version = int(self.redis.get(VERSION_LATEST))
+
                 if len(futures) > 0 and futures[0].done():
                     res = futures.pop(0).result()
                     if res is not None:
+                        latest_version = int(self.redis.get(VERSION_LATEST))
                         buffers, versions, uuid, name, result = res
                         relevant_buffers = self._update_ratings(name, versions, buffers, latest_version, result)
                         yield from relevant_buffers
                 elif len(futures) < os.cpu_count():
+                    latest_version = int(self.redis.get(VERSION_LATEST))
                     futures.append(ex.submit(
                         RedisRolloutGenerator._process_rollout,
                         self.redis.blpop(ROLLOUTS)[1],
@@ -357,6 +359,7 @@ class RedisRolloutWorker:
                 rollout_data = [
                     [encode_gamestate(info["state"]) for info in rollouts[0].infos],
                     [rollout.actions for rollout in rollouts],
+                    [rollout.log_probs for rollout in rollouts],
                     [version for agent, version in agents]
                 ]
                 rollout_data = _serialize((rollout_data, self.uuid, self.name, result))
