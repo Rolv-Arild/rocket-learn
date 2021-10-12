@@ -123,14 +123,14 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             for _ in range(len(gamestates[0].players))
         ]
         last_actions = np.zeros((len(gamestates[0].players), 8))
-        for s, gs in enumerate(gamestates):
+        for s, gs in enumerate(gamestates[1:], start=1):
             final = s == len(gamestates) - 1
             for i, player in enumerate(gs.players):
                 if s > 0:
                     prev_act = policy.env_compatible(last_actions[i])
                 else:
                     prev_act = np.zeros(8)
-                obs = obs_builder.build_obs(player, gs, prev_act)
+                obs = obs_builder.build_obs(gamestates[s - 1].players[i], gamestates[s - 1], prev_act)
                 if final:
                     rew = rew_func.get_final_reward(player, gs, prev_act)
                 else:
