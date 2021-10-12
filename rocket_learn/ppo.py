@@ -130,9 +130,10 @@ class PPO:
                 while size < self.n_steps:
                     try:
                         rollout = next(rollout_gen)
-                        size += rollout.size()
-                        # progress.update(rollout.size())
-                        yield rollout
+                        if rollout.size() > 0:
+                            size += rollout.size()
+                            # progress.update(rollout.size())
+                            yield rollout
                     except StopIteration:
                         return
 
@@ -146,7 +147,6 @@ class PPO:
             
             t1 = time.time()
             self.logger.log({"fps": self.n_steps / (t1 - t0)})
-
 
     def set_logger(self, logger):
         self.logger = logger
