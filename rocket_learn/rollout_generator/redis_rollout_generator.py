@@ -122,21 +122,25 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             ExperienceBuffer()
             for _ in range(len(gamestates[0].players))
         ]
-        last_actions = np.zeros((len(gamestates[0].players), 8))
-        for s, gs in enumerate(gamestates[1:], start=1):
+        env_actions = [
+            # [np.zeros(8)] +
+            [
+                policy.env_compatible(actions[p][s])
+                for s in range(len(actions[p]))
+            ]
+            for p in range(len(actions))
+        ]
+        # TODO we're throwing away states, anything we can do?
+        #  Maybe use an ObsBuilder in worker that just returns GameState+prev_action somehow?
+        for s, gs in enumerate(gamestates[2:], start=2):  # Start at 2 to keep env actions correct
             final = s == len(gamestates) - 1
             for i, player in enumerate(gs.players):
-                if s > 0:
-                    prev_act = policy.env_compatible(last_actions[i])
-                else:
-                    prev_act = np.zeros(8)
-                obs = obs_builder.build_obs(gamestates[s - 1].players[i], gamestates[s - 1], prev_act)
+                obs = obs_builder.build_obs(gamestates[s - 1].players[i], gamestates[s - 1], env_actions[i][s - 2])
                 if final:
-                    rew = rew_func.get_final_reward(player, gs, prev_act)
+                    rew = rew_func.get_final_reward(player, gs, env_actions[i][s - 1])
                 else:
-                    rew = rew_func.get_reward(player, gs, prev_act)
+                    rew = rew_func.get_reward(player, gs, env_actions[i][s - 1])
                 buffers[i].add_step(obs, actions[i][s], rew, final, log_probs[i][s], None)
-                last_actions[i, :] = actions[i][s]
 
         return buffers, versions, uuid, name, result  # relevant_buffers
 
@@ -208,12 +212,13 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         ratings = [Rating(*_unserialize(v)) for v in self.redis.lrange(QUALITIES, 0, -1)]
         if ratings:
             mus = np.array([r.mu for r in ratings])
-            conf = np.array([r.sigma for r in ratings])
+            sigmas = np.array([r.sigma for r in ratings])
 
             x = np.arange(len(mus))
             y = mus
-            y_upper = mus + 2 * conf  # 95% confidence
-            y_lower = mus - 2 * conf
+            y_upper = mus + 2 * sigmas  # 95% confidence
+            y_lower = mus - 2 * sigmas
+
             fig = go.Figure([
                 go.Scatter(
                     x=x,
