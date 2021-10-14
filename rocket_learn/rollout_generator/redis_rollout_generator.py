@@ -110,7 +110,7 @@ def decode_buffers(enc_buffers, policy=None, obs_build_func=None, rew_build_func
         #  Maybe use an ObsBuilder in worker that just returns GameState+prev_action somehow?
         obss = [obs_builder.build_obs(p, game_states[0], env_actions[i][0])
                 for i, p in enumerate(game_states[0].players)]
-        for s, gs in enumerate(game_states[1:], start=1):  # Start at 2 to keep env actions correct
+        for s, gs in enumerate(game_states[1:], start=1):  # Start at 1 to keep env actions correct
             final = s == len(game_states) - 1
             old_obs = obss
             obss = []
