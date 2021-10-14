@@ -5,7 +5,7 @@ from threading import Thread
 import cloudpickle as pickle
 import time
 from collections import Counter
-from typing import Iterator, Callable
+from typing import Iterator, Callable, List
 from uuid import uuid4
 
 import msgpack
@@ -73,6 +73,58 @@ def _unserialize_model(buf):
     # return torch.load(buf)
 
 
+def encode_buffers(buffers: List[ExperienceBuffer], strict=False):
+    if not strict:
+        states = np.asarray([encode_gamestate(info["state"]) for info in buffers[0].infos])
+        actions = np.asarray([buffer.actions for buffer in buffers])
+        log_probs = np.asarray([buffer.log_probs for buffer in buffers])
+        return states, actions, log_probs
+    else:
+        return [
+            (buffer.meta, buffer.observations, buffer.actions, buffer.rewards, buffer.dones, buffer.log_probs)
+            for buffer in buffers
+        ]
+
+
+def decode_buffers(enc_buffers, policy=None, obs_build_func=None, rew_build_func=None):
+    if len(enc_buffers) == 3:
+        game_states, actions, log_probs = enc_buffers
+        game_states = [GameState(gs) for gs in game_states]
+        obs_builder = obs_build_func()
+        rew_func = rew_build_func()
+        obs_builder.reset(game_states[0])
+        rew_func.reset(game_states[0])
+        buffers = [
+            ExperienceBuffer()
+            for _ in range(len(game_states[0].players))
+        ]
+        env_actions = [
+            # [np.zeros(8)] +
+            [
+                policy.env_compatible(actions[p][s])
+                for s in range(len(actions[p]))
+            ]
+            for p in range(len(actions))
+        ]
+        # TODO we're throwing away states, anything we can do?
+        #  Maybe use an ObsBuilder in worker that just returns GameState+prev_action somehow?
+        for s, gs in enumerate(game_states[2:], start=2):  # Start at 2 to keep env actions correct
+            final = s == len(game_states) - 1
+            for i, player in enumerate(gs.players):
+                obs = obs_builder.build_obs(game_states[s - 1].players[i], game_states[s - 1], env_actions[i][s - 2])
+                if final:
+                    rew = rew_func.get_final_reward(player, gs, env_actions[i][s - 1])
+                else:
+                    rew = rew_func.get_reward(player, gs, env_actions[i][s - 1])
+                buffers[i].add_step(obs, actions[i][s], rew, final, log_probs[i][s], None)
+
+        return buffers
+    else:
+        meta, obs, actions, rews, dones, log_probs = enc_buffers
+        return ExperienceBuffer(meta=meta, observations=obs, actions=actions,
+                                rewards=rews, dones=dones, log_probs=log_probs)
+
+
 class RedisRolloutGenerator(BaseRolloutGenerator):
     """
     Rollout generator in charge of sending commands to workers via redis
@@ -92,12 +144,13 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
 
         # TODO saving/loading
         if clear:
-            for key in _ALL:
-                if self.redis.exists(key) > 0:
-                    self.redis.delete(key)
+            self.redis.delete(_ALL)
             self.redis.set(N_UPDATES, 0)
             self.redis.set(SAVE_FREQ, save_every)
             self.redis.set(QUALITY_LATEST, _serialize((0, 1)))
+        else:
+            if self.redis.exists(ROLLOUTS) > 0:
+                self.redis.delete(ROLLOUTS)
 
         self.contributors = Counter()  # No need to save, clears every iteration
         self.obs_build_func = obs_build_factory
@@ -105,43 +158,14 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
 
     @staticmethod
     def _process_rollout(rollout_bytes, latest_version, policy, obs_build_func, rew_build_func):
-        rollout_data, uuid, name, result = _unserialize(rollout_bytes)
+        rollout_data, versions, uuid, name, result = _unserialize(rollout_bytes)
 
         # TODO log uuid?
 
-        gamestates, actions, log_probs, versions = rollout_data
         if not any(version < 0 and abs(version - latest_version) <= 1 for version in versions):
             return
 
-        gamestates = [GameState(gs) for gs in gamestates]
-        obs_builder = obs_build_func()
-        rew_func = rew_build_func()
-        obs_builder.reset(gamestates[0])
-        rew_func.reset(gamestates[0])
-        buffers = [
-            ExperienceBuffer()
-            for _ in range(len(gamestates[0].players))
-        ]
-        env_actions = [
-            # [np.zeros(8)] +
-            [
-                policy.env_compatible(actions[p][s])
-                for s in range(len(actions[p]))
-            ]
-            for p in range(len(actions))
-        ]
-        # TODO we're throwing away states, anything we can do?
-        #  Maybe use an ObsBuilder in worker that just returns GameState+prev_action somehow?
-        for s, gs in enumerate(gamestates[2:], start=2):  # Start at 2 to keep env actions correct
-            final = s == len(gamestates) - 1
-            for i, player in enumerate(gs.players):
-                obs = obs_builder.build_obs(gamestates[s - 1].players[i], gamestates[s - 1], env_actions[i][s - 2])
-                if final:
-                    rew = rew_func.get_final_reward(player, gs, env_actions[i][s - 1])
-                else:
-                    rew = rew_func.get_reward(player, gs, env_actions[i][s - 1])
-                buffers[i].add_step(obs, actions[i][s], rew, final, log_probs[i][s], None)
-
+        buffers = decode_buffers(rollout_data)
         return buffers, versions, uuid, name, result  # relevant_buffers
 
     def _update_ratings(self, name, versions, buffers, latest_version, result):
@@ -361,13 +385,9 @@ class RedisRolloutWorker:
             rollouts, result = util.generate_episode(self.env, [agent for agent, version in agents])
 
             if not self.display_only:
-                rollout_data = [
-                    [encode_gamestate(info["state"]) for info in rollouts[0].infos],
-                    [rollout.actions for rollout in rollouts],
-                    [rollout.log_probs for rollout in rollouts],
-                    [version for agent, version in agents]
-                ]
-                rollout_data = _serialize((rollout_data, self.uuid, self.name, result))
+                rollout_data = encode_buffers(rollouts)
+                versions = [version for agent, version in agents]
+                rollout_data = _serialize((rollout_data, versions, self.uuid, self.name, result))
                 t.join()
                 t = Thread(target=lambda: self.redis.rpush(ROLLOUTS, rollout_data))
                 t.start()

@@ -73,7 +73,7 @@ class SplitLayer(nn.Module):
         if splits is not None:
             self.splits = splits
         else:
-            self.splits = (3, 3, 3, 3, 3, 2, 2, 2)
+            self.splits = (3,) * 5 +  (2,) * 3
 
     def forward(self, x):
         return torch.split(x, self.splits, dim=-1)
