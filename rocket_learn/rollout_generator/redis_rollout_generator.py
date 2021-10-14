@@ -1,3 +1,4 @@
+import functools
 import os
 from concurrent.futures import ProcessPoolExecutor
 from threading import Thread
@@ -176,7 +177,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             return
 
         buffers = decode_buffers(rollout_data, policy, obs_build_func, rew_build_func)
-        return buffers, versions, uuid, name, result  # relevant_buffers
+        return buffers, versions, uuid, name, result
 
     def _update_ratings(self, name, versions, buffers, latest_version, result):
         ratings = []
@@ -350,6 +351,10 @@ class RedisRolloutWorker:
         indices = np.random.choice(len(probs), n, p=probs)
         return indices
 
+    @functools.lru_cache(maxsize=8)
+    def _get_past_model(self, version):
+        return _unserialize_model(self.redis.lindex(OPPONENT_MODELS, version))
+
     def run(self):  # Mimics Thread
         """
         begin processing in already launched match and push to redis
@@ -394,7 +399,7 @@ class RedisRolloutWorker:
 
                 for index in old_versions:
                     version = int(index)
-                    selected_agent = _unserialize_model(self.redis.lindex(OPPONENT_MODELS, version))
+                    selected_agent = self._get_past_model(version)
                     agents.append((selected_agent, version))
 
             np.random.shuffle(agents)
@@ -405,7 +410,7 @@ class RedisRolloutWorker:
             if not self.display_only:
                 rollout_data = encode_buffers(rollouts, strict=True)
                 versions = [version for agent, version in agents]
-                rollout_data = _serialize((rollout_data, versions, self.uuid, self.name, result))
+                rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result))
                 t.join()
-                t = Thread(target=lambda: self.redis.rpush(ROLLOUTS, rollout_data))
+                t = Thread(target=lambda: self.redis.rpush(ROLLOUTS, rollout_bytes))
                 t.start()
