@@ -6,14 +6,15 @@ RLGym training tool
   - Give both PPO and RolloutGenerator access ✔
   - Also normal logging instead of prints
 - Add reward normalization (and distribution?)
-- Centralize RewardFunction
+- Centralize RewardFunction ✔
+- Transfer model to CPU before storing
 - Model freedom
   - Multiple inputs ✔ (when obs is tuple it batches them one by one)
   - Allow shared layers
   - Recurrent?
   - Continuous actions if we really want
 - Redis features 
-  - Saving and loading (put everything we need into redis and call redis.save(), figure out loading)
+  - Saving and loading ✔ (could be more streamlined though)
   - Full setup (architecture, params, config?) communicated via redis, can start worker with only IP (may not be feasible)
   - Version quality is most important measurement, need to log it ✔
   - Implement quality update ✔
