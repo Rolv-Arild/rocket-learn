@@ -49,8 +49,8 @@ def generate_episode(env: Gym, policies: List[Policy]) -> (List[ExperienceBuffer
             if len(policies) <= 1:
                 observations, rewards = [observations], [rewards]
             # Might be different if only one agent?
-            for exp_buf, obs, act, rew in zip(rollouts, old_obs, all_indices, rewards):
-                exp_buf.add_step(obs, act, rew, done, log_probs, info)
+            for exp_buf, obs, act, rew, log_prob in zip(rollouts, old_obs, all_indices, rewards, all_log_probs):
+                exp_buf.add_step(obs, act, rew, done, log_prob, info)
 
             for i in range(len(policies)):
                 ep_rews[i] += rewards[i]
