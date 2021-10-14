@@ -192,7 +192,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             ratings.append(rating)
 
         blue_players = sum(divmod(len(ratings), 2))
-        blue, orange = ratings[:blue_players], ratings[blue_players:]
+        blue = tuple(ratings[:blue_players])  # Tuple is important
+        orange = tuple(ratings[blue_players:])
 
         # In ranks lowest number is best, result=-1 is orange win, 0 tie, 1 blue
         r1, r2 = rate((blue, orange), ranks=(0, result))
