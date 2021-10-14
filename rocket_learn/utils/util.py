@@ -36,7 +36,7 @@ def generate_episode(env: Gym, policies: List[Policy]) -> (List[ExperienceBuffer
             for policy, obs in zip(policies, observations):
                 dist = policy.get_action_distribution(obs)
                 action_indices = policy.sample_action(dist, deterministic=False)
-                log_probs = policy.log_prob(dist, action_indices).numpy()
+                log_probs = policy.log_prob(dist, action_indices).item()
                 actions = policy.env_compatible(action_indices)
 
                 all_indices.append(action_indices.numpy())
@@ -73,7 +73,7 @@ class SplitLayer(nn.Module):
         if splits is not None:
             self.splits = splits
         else:
-            self.splits = (3,) * 5 +  (2,) * 3
+            self.splits = (3,) * 5 + (2,) * 3
 
     def forward(self, x):
         return torch.split(x, self.splits, dim=-1)

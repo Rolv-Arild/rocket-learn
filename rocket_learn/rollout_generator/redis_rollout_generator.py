@@ -74,7 +74,7 @@ def _unserialize_model(buf):
 
 
 def encode_buffers(buffers: List[ExperienceBuffer], strict=False):
-    if not strict:
+    if strict:
         states = np.asarray([encode_gamestate(info["state"]) for info in buffers[0].infos])
         actions = np.asarray([buffer.actions for buffer in buffers])
         log_probs = np.asarray([buffer.log_probs for buffer in buffers])
@@ -89,7 +89,7 @@ def encode_buffers(buffers: List[ExperienceBuffer], strict=False):
 def decode_buffers(enc_buffers, policy=None, obs_build_func=None, rew_build_func=None):
     if len(enc_buffers) == 3:
         game_states, actions, log_probs = enc_buffers
-        game_states = [GameState(gs) for gs in game_states]
+        game_states = [GameState(gs.tolist()) for gs in game_states]
         obs_builder = obs_build_func()
         rew_func = rew_build_func()
         obs_builder.reset(game_states[0])
@@ -108,21 +108,31 @@ def decode_buffers(enc_buffers, policy=None, obs_build_func=None, rew_build_func
         ]
         # TODO we're throwing away states, anything we can do?
         #  Maybe use an ObsBuilder in worker that just returns GameState+prev_action somehow?
-        for s, gs in enumerate(game_states[2:], start=2):  # Start at 2 to keep env actions correct
+        obss = [obs_builder.build_obs(p, game_states[0], env_actions[i][0])
+                for i, p in enumerate(game_states[0].players)]
+        for s, gs in enumerate(game_states[1:], start=1):  # Start at 2 to keep env actions correct
             final = s == len(game_states) - 1
+            old_obs = obss
+            obss = []
             for i, player in enumerate(gs.players):
-                obs = obs_builder.build_obs(game_states[s - 1].players[i], game_states[s - 1], env_actions[i][s - 2])
+                obs = obs_builder.build_obs(player, gs, env_actions[i][s])
                 if final:
-                    rew = rew_func.get_final_reward(player, gs, env_actions[i][s - 1])
+                    rew = rew_func.get_final_reward(player, gs, env_actions[i][s])
                 else:
-                    rew = rew_func.get_reward(player, gs, env_actions[i][s - 1])
-                buffers[i].add_step(obs, actions[i][s], rew, final, log_probs[i][s], None)
+                    rew = rew_func.get_reward(player, gs, env_actions[i][s])
+                buffers[i].add_step(old_obs[i], actions[i][s], rew, final, log_probs[i][s], None)
+                obss.append(obs)
 
         return buffers
     else:
-        meta, obs, actions, rews, dones, log_probs = enc_buffers
-        return ExperienceBuffer(meta=meta, observations=obs, actions=actions,
-                                rewards=rews, dones=dones, log_probs=log_probs)
+        buffers = []
+        for enc_buffer in enc_buffers:
+            meta, obs, actions, rews, dones, log_probs = enc_buffer
+            buffers.append(
+                ExperienceBuffer(meta=meta, observations=obs, actions=actions,
+                                 rewards=rews, dones=dones, log_probs=log_probs)
+            )
+        return buffers
 
 
 class RedisRolloutGenerator(BaseRolloutGenerator):
@@ -144,7 +154,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
 
         # TODO saving/loading
         if clear:
-            self.redis.delete(_ALL)
+            self.redis.delete(*_ALL)
             self.redis.set(N_UPDATES, 0)
             self.redis.set(SAVE_FREQ, save_every)
             self.redis.set(QUALITY_LATEST, _serialize((0, 1)))
@@ -165,7 +175,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         if not any(version < 0 and abs(version - latest_version) <= 1 for version in versions):
             return
 
-        buffers = decode_buffers(rollout_data)
+        buffers = decode_buffers(rollout_data, policy, obs_build_func, rew_build_func)
         return buffers, versions, uuid, name, result  # relevant_buffers
 
     def _update_ratings(self, name, versions, buffers, latest_version, result):
@@ -385,7 +395,7 @@ class RedisRolloutWorker:
             rollouts, result = util.generate_episode(self.env, [agent for agent, version in agents])
 
             if not self.display_only:
-                rollout_data = encode_buffers(rollouts)
+                rollout_data = encode_buffers(rollouts, strict=True)
                 versions = [version for agent, version in agents]
                 rollout_data = _serialize((rollout_data, versions, self.uuid, self.name, result))
                 t.join()
