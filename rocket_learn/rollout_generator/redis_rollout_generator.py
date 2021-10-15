@@ -1,18 +1,20 @@
 import functools
 import os
-import zlib
-from concurrent.futures import ProcessPoolExecutor
-from threading import Thread
-
-import cloudpickle as pickle
 import time
+import zlib
 from collections import Counter
-from typing import Iterator, Callable, List
+from concurrent.futures import ProcessPoolExecutor
+from queue import Queue
+from threading import Thread
+from traceback import print_exc
+from typing import Callable, Iterator, List
 from uuid import uuid4
 
+import cloudpickle as pickle
 import msgpack
 import msgpack_numpy as m
 import numpy as np
+import plotly.graph_objs as go
 # import matplotlib.pyplot  # noqa
 import wandb
 # from matplotlib.axes import Axes
@@ -20,19 +22,18 @@ import wandb
 from gym.vector.utils import CloudpickleWrapper
 from redis import Redis
 from redis.exceptions import ResponseError
-from rlgym.utils import ObsBuilder, RewardFunction
-from rlgym.utils.obs_builders import AdvancedObs
-from trueskill import Rating, rate
-import plotly.graph_objs as go
-
 from rlgym.envs import Match
 from rlgym.gamelaunch import LaunchPreference
 from rlgym.gym import Gym
+from rlgym.utils import ObsBuilder, RewardFunction
 from rlgym.utils.gamestates import GameState
+from rlgym.utils.obs_builders import AdvancedObs
 from rocket_learn.experience_buffer import ExperienceBuffer
-from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
+from rocket_learn.rollout_generator.base_rollout_generator import \
+    BaseRolloutGenerator
 from rocket_learn.utils import util
-from rocket_learn.utils.util import softmax, encode_gamestate
+from rocket_learn.utils.util import encode_gamestate, softmax
+from trueskill import Rating, rate
 
 # Constants for consistent key lookup
 QUALITIES = "qualities"
@@ -56,7 +57,7 @@ m.patch()
 
 # Helper methods for easier changing of byte conversion
 def _serialize(obj):
-    return zlib.compress(msgpack.packb(obj))
+    return zlib.compress(msgpack.packb(obj), level=9)
 
 
 def _unserialize(obj):
@@ -363,62 +364,110 @@ class RedisRolloutWorker:
     def _get_past_model(self, version):
         return _unserialize_model(self.redis.lindex(OPPONENT_MODELS, version))
 
+    # def upload_rollouts(self, q):
+    #     print("Rollouts uploader online")
+    #     multi_rollouts = []
+    #     while True:
+    #         item = q.get()
+
+    #         if item == False:
+    #             print("Breaking after sending rollouts")
+    #             for rollout_bytes_ in multi_rollouts:
+    #                 self.redis.rpush(ROLLOUTS, rollout_bytes_)
+    #             multi_rollouts = []
+    #             print("Rollouts have been rolled out")
+    #             break
+
+    #         rollouts, result, agents = item
+    #         rollout_data = encode_buffers(rollouts, strict=True)
+    #         versions = [version for _, version in agents]
+    #         rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result))
+    #         multi_rollouts.append(rollout_bytes)
+
+    #         if len(multi_rollouts) >= 8:
+    #             for rollout_bytes_ in multi_rollouts:
+    #                 self.redis.rpush(ROLLOUTS, rollout_bytes_)
+    #             multi_rollouts = []
+    #             print("Rollouts have been rolled out")
+
+    def upload_rollouts(self, q):
+        print("Rollouts uploader online")
+        while True:
+            item = q.get()
+
+            if item == False:
+                break
+
+            rollouts, result, agents = item
+            rollout_data = encode_buffers(rollouts, strict=True)
+            versions = [version for _, version in agents]
+            rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result))
+            self.redis.rpush(ROLLOUTS, rollout_bytes)
+
     def run(self):  # Mimics Thread
         """
         begin processing in already launched match and push to redis
         """
         n = 0
         latest_version = None
-        t = Thread()
-        t.start()
-        while True:
-            # Get the most recent version available
-            available_version = self.redis.get(VERSION_LATEST)
-            if available_version is None:
-                time.sleep(1)
-                continue  # Wait for version to be published (not sure if this is necessary?)
-            available_version = int(available_version)
-                
-            # Only try to download latest version when new
-            if latest_version != available_version:  
-                model_bytes = self.redis.get(MODEL_LATEST)
-                if model_bytes is None:
+
+        if not self.display_only:
+            q = Queue(maxsize=2)
+            t = Thread(target=self.upload_rollouts, args=(q,), daemon=True)
+            t.start()
+
+        try:
+            while True:
+                # Get the most recent version available
+                available_version = self.redis.get(VERSION_LATEST)
+                if available_version is None:
                     time.sleep(1)
-                    continue  # This is maybe not necessary? Can't hurt to leave it in.
-                latest_version = available_version
-                updated_agent = _unserialize_model(model_bytes)
-                self.current_agent = updated_agent
-            
-            n += 1
+                    continue  # Wait for version to be published (not sure if this is necessary?)
+                available_version = int(available_version)
+                    
+                # Only try to download latest version when new
+                if latest_version != available_version:  
+                    model_bytes = self.redis.get(MODEL_LATEST)
+                    if model_bytes is None:
+                        time.sleep(1)
+                        continue  # This is maybe not necessary? Can't hurt to leave it in.
+                    latest_version = available_version
+                    updated_agent = _unserialize_model(model_bytes)
+                    self.current_agent = updated_agent
+                
+                n += 1
 
-            # TODO customizable past agent selection, should team only be same agent?
-            agents = [(self.current_agent, latest_version)]  # Use at least one current agent
+                # TODO customizable past agent selection, should team only be same agent?
+                agents = [(self.current_agent, latest_version)]  # Use at least one current agent
 
-            if self.n_agents > 1:
-                # Ensure final proportion is same
-                adjusted_prob = (self.current_version_prob * self.n_agents - 1) / (self.n_agents - 1)
-                n_old = np.random.binomial(n=self.n_agents - 1, p=1 - adjusted_prob)
-                n_new = self.n_agents - n_old - 1
-                old_versions = self._get_opponent_indices(n_old)
-                for _ in range(n_new):
-                    version = latest_version
-                    selected_agent = self.current_agent
-                    agents.append((selected_agent, version))
+                if self.n_agents > 1:
+                    # Ensure final proportion is same
+                    adjusted_prob = (self.current_version_prob * self.n_agents - 1) / (self.n_agents - 1)
+                    n_old = np.random.binomial(n=self.n_agents - 1, p=1 - adjusted_prob)
+                    n_new = self.n_agents - n_old - 1
+                    old_versions = self._get_opponent_indices(n_old)
+                    for _ in range(n_new):
+                        version = latest_version
+                        selected_agent = self.current_agent
+                        agents.append((selected_agent, version))
 
-                for index in old_versions:
-                    version = int(index)
-                    selected_agent = self._get_past_model(version)
-                    agents.append((selected_agent, version))
+                    for index in old_versions:
+                        version = int(index)
+                        selected_agent = self._get_past_model(version)
+                        agents.append((selected_agent, version))
 
-            np.random.shuffle(agents)
-            print("Generating rollout with versions:", [v for a, v in agents])
+                np.random.shuffle(agents)
+                print("Generating rollout with versions:", [v for _, v in agents])
 
-            rollouts, result = util.generate_episode(self.env, [agent for agent, version in agents])
+                rollouts, result = util.generate_episode(self.env, [agent for agent, version in agents])
 
+                if not self.display_only:
+                    q.put((rollouts, result, agents))
+        except:
+            # if there's an error, we still want to know what it was so print the traceback
+            print_exc()
+        finally:
+            # let the program finish uploading rollouts
             if not self.display_only:
-                rollout_data = encode_buffers(rollouts, strict=True)
-                versions = [version for agent, version in agents]
-                rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result))
-                t.join()
-                t = Thread(target=lambda: self.redis.rpush(ROLLOUTS, rollout_bytes))
-                t.start()
+                q.put(False)
+                q.join()
