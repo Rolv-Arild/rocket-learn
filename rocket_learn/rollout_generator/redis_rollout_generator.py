@@ -205,7 +205,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
 
         for version, ratings in versions.items():
             avg_rating = Rating((sum(r.mu for r in ratings) / len(ratings)),
-                                (sum(r.sigma for r in ratings) / len(ratings)))
+                                (sum(r.sigma ** 2 for r in ratings) / len(ratings)) ** 0.5)  # Average vars
             if version > 0:  # Old
                 self.redis.lset(QUALITIES, version, _serialize(tuple(avg_rating)))
             elif version == latest_version:
