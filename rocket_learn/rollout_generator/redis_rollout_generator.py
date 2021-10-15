@@ -1,5 +1,6 @@
 import functools
 import os
+import zlib
 from concurrent.futures import ProcessPoolExecutor
 from threading import Thread
 
@@ -45,24 +46,25 @@ QUALITY_LATEST = "model-rating"
 ROLLOUTS = "rollout"
 OPPONENT_MODELS = "opponent-models"
 WORKER_IDS = "worker-ids"
+CONTRIBUTORS = "contributors"
 _ALL = (
     QUALITIES, N_UPDATES, SAVE_FREQ, MODEL_LATEST, ROLLOUTS, VERSION_LATEST, QUALITY_LATEST, OPPONENT_MODELS,
-    WORKER_IDS)
+    WORKER_IDS, CONTRIBUTORS)
 
 m.patch()
 
 
 # Helper methods for easier changing of byte conversion
 def _serialize(obj):
-    return msgpack.packb(obj)
+    return zlib.compress(msgpack.packb(obj))
 
 
 def _unserialize(obj):
-    return msgpack.unpackb(obj)
+    return msgpack.unpackb(zlib.decompress(obj))
 
 
 def _serialize_model(mdl):
-    return pickle.dumps(mdl)
+    return pickle.dumps(mdl.cpu())
     # buf = io.BytesIO()
     # torch.save([mdl.actor, mdl.critic, mdl.shared], buf)
     # return buf
@@ -70,7 +72,7 @@ def _serialize_model(mdl):
 
 def _unserialize_model(buf):
     agent = pickle.loads(buf)
-    return agent.cpu()
+    return agent
     # return torch.load(buf)
 
 
@@ -171,8 +173,6 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
     def _process_rollout(rollout_bytes, latest_version, policy, obs_build_func, rew_build_func):
         rollout_data, versions, uuid, name, result = _unserialize(rollout_bytes)
 
-        # TODO log uuid?
-
         if not any(version < 0 and abs(version - latest_version) <= 1 for version in versions):
             return
 
@@ -187,6 +187,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                 rating = Rating(*_unserialize(self.redis.get(QUALITY_LATEST)))
                 relevant_buffers.append(buffer)
                 self.contributors[name] += buffer.size()
+            elif version < 0:
+                return []
             else:
                 rating = Rating(*_unserialize(self.redis.lindex(QUALITIES, version)))
             ratings.append(rating)
@@ -199,11 +201,11 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         r1, r2 = rate((blue, orange), ranks=(0, result))
 
         # Some trickery to handle same rating appearing multiple times, we just average their new mus and sigmas
-        versions = {}
+        ratings_versions = {}
         for rating, version in zip(r1 + r2, versions):
-            versions.setdefault(version, []).append(rating)
+            ratings_versions.setdefault(version, []).append(rating)
 
-        for version, ratings in versions.items():
+        for version, ratings in ratings_versions.items():
             avg_rating = Rating((sum(r.mu for r in ratings) / len(ratings)),
                                 (sum(r.sigma ** 2 for r in ratings) / len(ratings)) ** 0.5)  # Average vars
             if version > 0:  # Old
@@ -305,6 +307,11 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             "contributors": wandb.Table(columns=["name", "steps"], data=self.contributors.most_common())},
             commit=False
         )
+        tot_contributors = self.redis.hgetall(CONTRIBUTORS)
+        tot_contributors = Counter({name: int(count) for name, count in tot_contributors.items()})
+        tot_contributors += self.contributors
+        if tot_contributors:
+            self.redis.hset(CONTRIBUTORS, mapping=tot_contributors)
         self.contributors.clear()
 
         n_updates = self.redis.incr(N_UPDATES) - 1
