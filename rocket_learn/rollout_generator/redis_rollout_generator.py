@@ -64,16 +64,15 @@ def _unserialize(obj):
 
 
 def _serialize_model(mdl):
-    return pickle.dumps(mdl.cpu())
-    # buf = io.BytesIO()
-    # torch.save([mdl.actor, mdl.critic, mdl.shared], buf)
-    # return buf
+    device = next(mdl.parameters()).device  # Must be a better way right?
+    mdl_bytes = pickle.dumps(mdl.cpu())
+    mdl.to(device)
+    return mdl_bytes
 
 
 def _unserialize_model(buf):
     agent = pickle.loads(buf)
     return agent
-    # return torch.load(buf)
 
 
 def encode_buffers(buffers: List[ExperienceBuffer], strict=False):
@@ -378,9 +377,9 @@ class RedisRolloutWorker:
                 time.sleep(1)
                 continue  # Wait for version to be published (not sure if this is necessary?)
             available_version = int(available_version)
-                
+
             # Only try to download latest version when new
-            if latest_version != available_version:  
+            if latest_version != available_version:
                 model_bytes = self.redis.get(MODEL_LATEST)
                 if model_bytes is None:
                     time.sleep(1)
@@ -388,7 +387,7 @@ class RedisRolloutWorker:
                 latest_version = available_version
                 updated_agent = _unserialize_model(model_bytes)
                 self.current_agent = updated_agent
-            
+
             n += 1
 
             # TODO customizable past agent selection, should team only be same agent?
