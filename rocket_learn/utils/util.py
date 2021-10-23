@@ -1,10 +1,12 @@
-from typing import List
+from typing import List, Any
 
 import numpy as np
 import torch
 import torch.distributions
 from rlgym.gym import Gym
-from rlgym.utils.gamestates import GameState
+from rlgym.utils import ObsBuilder
+from rlgym.utils.gamestates import GameState, PlayerData
+from rlgym.utils.obs_builders import AdvancedObs
 from torch import nn
 
 from rocket_learn.agent.policy import Policy
@@ -108,3 +110,11 @@ def encode_gamestate(state: GameState):
             p.boost_amount
         ]
     return state_vals
+
+
+class ExpandAdvancedObs(AdvancedObs):
+    def build_obs(self, player: PlayerData, state: GameState, previous_action: np.ndarray) -> Any:
+        return np.reshape(
+            super(ExpandAdvancedObs, self).build_obs(player, state, previous_action),
+            (1, -1)
+        )
