@@ -56,7 +56,7 @@ m.patch()
 
 # Helper methods for easier changing of byte conversion
 def _serialize(obj):
-    return zlib.compress(msgpack.packb(obj))
+    return zlib.compress(msgpack.packb(obj), level=9)
 
 
 def _unserialize(obj):
@@ -151,6 +151,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             logger=None,
             clear=True
     ):
+        self.tot_bytes = 0
         self.redis = redis
         self.logger = logger
 
@@ -233,9 +234,11 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                         yield from relevant_buffers
                 elif len(futures) < os.cpu_count():
                     latest_version = int(self.redis.get(VERSION_LATEST))
+                    data = self.redis.blpop(ROLLOUTS)[1]
+                    self.tot_bytes += len(data)
                     futures.append(ex.submit(
                         RedisRolloutGenerator._process_rollout,
-                        self.redis.blpop(ROLLOUTS)[1],
+                        data,
                         latest_version,
                         _unserialize_model(self.redis.get(MODEL_LATEST)),
                         CloudpickleWrapper(self.obs_build_func),
@@ -312,6 +315,9 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         if tot_contributors:
             self.redis.hset(CONTRIBUTORS, mapping=tot_contributors)
         self.contributors.clear()
+
+        self.logger.log({"rollout_bytes": self.tot_bytes}, commit=False)
+        self.tot_bytes = 0
 
         n_updates = self.redis.incr(N_UPDATES) - 1
         save_freq = int(self.redis.get(SAVE_FREQ))
@@ -415,7 +421,7 @@ class RedisRolloutWorker:
             rollouts, result = util.generate_episode(self.env, [agent for agent, version in agents])
 
             if not self.display_only:
-                rollout_data = encode_buffers(rollouts, strict=True)
+                rollout_data = encode_buffers(rollouts, strict=False)  # TODO change
                 versions = [version for agent, version in agents]
                 rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result))
                 t.join()

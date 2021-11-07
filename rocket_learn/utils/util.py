@@ -112,6 +112,7 @@ def encode_gamestate(state: GameState):
     return state_vals
 
 
+# TODO AdvancedObs should be supported by default, use stack instead of cat
 class ExpandAdvancedObs(AdvancedObs):
     def build_obs(self, player: PlayerData, state: GameState, previous_action: np.ndarray) -> Any:
         return np.reshape(
