@@ -336,13 +336,14 @@ class RedisRolloutWorker:
     Provides RedisRolloutGenerator with rollouts via a Redis server
     """
 
-    def __init__(self, redis: Redis, name: str, match: Match, current_version_prob=.9, display_only=False):
+    def __init__(self, redis: Redis, name: str, match: Match, current_version_prob=.9, display_only=False, send_gamestates=True):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
 
         self.current_agent = _unserialize_model(self.redis.get(MODEL_LATEST))
         self.current_version_prob = current_version_prob
+        self.send_gamestates = send_gamestates
 
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.uuid = str(uuid4())
@@ -421,7 +422,7 @@ class RedisRolloutWorker:
             rollouts, result = util.generate_episode(self.env, [agent for agent, version in agents])
 
             if not self.display_only:
-                rollout_data = encode_buffers(rollouts, strict=False)  # TODO change
+                rollout_data = encode_buffers(rollouts, strict=self.send_gamestates)  # TODO change
                 versions = [version for agent, version in agents]
                 rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result))
                 t.join()
