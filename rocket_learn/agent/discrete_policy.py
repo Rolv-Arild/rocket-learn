@@ -39,8 +39,9 @@ class DiscretePolicy(Policy):
 
         logits = self(obs)
 
-        triplets = th.stack(logits[:5])
-        duets = F.pad(th.stack(logits[5:]), pad=(0, 1), value=float("-inf"))
+        # TODO generalize more
+        triplets = th.stack([l for l in logits if len(logits) == 3])
+        duets = F.pad(th.stack([l for l in logits if len(logits) == 2]), pad=(0, 1), value=float("-inf"))
         logits = th.cat((triplets, duets)).swapdims(0, 1).squeeze()
 
         return Categorical(logits=logits)
