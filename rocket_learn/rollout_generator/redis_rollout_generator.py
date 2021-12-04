@@ -23,7 +23,7 @@ from redis.exceptions import ResponseError
 from rlgym.utils import ObsBuilder, RewardFunction
 from rlgym.utils.action_parsers import ActionParser
 from rlgym.utils.obs_builders import AdvancedObs
-from trueskill import Rating, rate
+from trueskill import Rating, rate, match_quality
 import plotly.graph_objs as go
 
 from rlgym.envs import Match
@@ -158,12 +158,12 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         if clear:
             self.redis.delete(*_ALL)
             self.redis.set(N_UPDATES, 0)
-            self.redis.set(SAVE_FREQ, save_every)
             self.redis.set(QUALITY_LATEST, _serialize((0, 1)))
         else:
             if self.redis.exists(ROLLOUTS) > 0:
                 self.redis.delete(ROLLOUTS)
 
+        self.redis.set(SAVE_FREQ, save_every)
         self.contributors = Counter()  # No need to save, clears every iteration
         self.obs_build_func = obs_build_factory
         self.rew_func_factory = rew_func_factory
@@ -360,9 +360,10 @@ class RedisRolloutWorker:
     def _get_opponent_indices(self, n):
         # Get qualities
         # sum priorities to have higher chance of selecting high sigma
-        qualities = np.asarray([sum(_unserialize(v)) for v in self.redis.lrange(QUALITIES, 0, -1)])
+        ratings = [Rating(*_unserialize(v)) for v in self.redis.lrange(QUALITIES, 0, -1)]
+        qualities = np.array([match_quality([r, ratings[-1]]) for r in ratings])
         # Pick opponent
-        probs = softmax(qualities / np.log(10))
+        probs = qualities / qualities.sum()
         indices = np.random.choice(len(probs), n, p=probs)
         return indices
 
