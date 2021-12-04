@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 import numpy as np
 import torch as th
@@ -10,22 +10,10 @@ from rocket_learn.agent.policy import Policy
 
 
 class DiscretePolicy(Policy):
-    def __init__(self, net: nn.Module, index_action_map: Optional[np.ndarray] = None):
+    def __init__(self, net: nn.Module, shape: Tuple[int, ...] = (3,) * 5 + (2,) * 3):
         super().__init__()
         self.net = net
-        if index_action_map is None:
-            self.index_action_map = np.array([
-                [-1., 0., 1.],
-                [-1., 0., 1.],
-                [-1., 0., 1.],
-                [-1., 0., 1.],
-                [-1., 0., 1.],
-                [0., 1., np.nan],
-                [0., 1., np.nan],
-                [0., 1., np.nan]
-            ])
-        else:
-            self.index_action_map = index_action_map
+        self.shape = shape
 
     def forward(self, obs):
         logits = self.net(obs)
@@ -39,10 +27,15 @@ class DiscretePolicy(Policy):
 
         logits = self(obs)
 
-        # TODO generalize more
-        triplets = th.stack([l for l in logits if len(logits) == 3])
-        duets = F.pad(th.stack([l for l in logits if len(logits) == 2]), pad=(0, 1), value=float("-inf"))
-        logits = th.cat((triplets, duets)).swapdims(0, 1).squeeze()
+        max_shape = max(self.shape)
+        logits = th.stack(
+            [
+                l
+                if l.shape[-1] == max_shape
+                else F.pad(l, pad=(0, max_shape - l.shape[-1]), value=float("-inf"))
+                for l in logits
+            ]
+        ).swapdims(0, 1).squeeze()
 
         return Categorical(logits=logits)
 
@@ -69,4 +62,4 @@ class DiscretePolicy(Policy):
     def env_compatible(self, action):
         if isinstance(action, th.Tensor):
             action = action.numpy()
-        return self.index_action_map[np.arange(len(self.index_action_map)), action.astype(int)]
+        return action

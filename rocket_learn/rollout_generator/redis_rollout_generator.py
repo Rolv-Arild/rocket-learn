@@ -21,6 +21,7 @@ from gym.vector.utils import CloudpickleWrapper
 from redis import Redis
 from redis.exceptions import ResponseError
 from rlgym.utils import ObsBuilder, RewardFunction
+from rlgym.utils.action_parsers import ActionParser
 from rlgym.utils.obs_builders import AdvancedObs
 from trueskill import Rating, rate
 import plotly.graph_objs as go
@@ -56,7 +57,7 @@ m.patch()
 
 # Helper methods for easier changing of byte conversion
 def _serialize(obj):
-    return zlib.compress(msgpack.packb(obj), level=9)
+    return zlib.compress(msgpack.packb(obj))
 
 
 def _unserialize(obj):
@@ -88,40 +89,37 @@ def encode_buffers(buffers: List[ExperienceBuffer], strict=False):
         ]
 
 
-def decode_buffers(enc_buffers, policy=None, obs_build_func=None, rew_build_func=None):
+def decode_buffers(enc_buffers, obs_build_factory=None, rew_func_factory=None, act_parse_factory=None):
     if len(enc_buffers) == 3:
         game_states, actions, log_probs = enc_buffers
         game_states = [GameState(gs.tolist()) for gs in game_states]
-        obs_builder = obs_build_func()
-        rew_func = rew_build_func()
+        obs_builder = obs_build_factory()
+        rew_func = rew_func_factory()
+        act_parser = act_parse_factory()
         obs_builder.reset(game_states[0])
         rew_func.reset(game_states[0])
         buffers = [
             ExperienceBuffer()
             for _ in range(len(game_states[0].players))
         ]
+
         env_actions = [
-            # [np.zeros(8)] +
-            [
-                policy.env_compatible(actions[p][s])
-                for s in range(len(actions[p]))
-            ]
-            for p in range(len(actions))
+            act_parser.parse_actions(actions[:, s, :].copy(), game_states[s])
+            for s in range(actions.shape[1])
         ]
-        # TODO we're throwing away states, anything we can do?
-        #  Maybe use an ObsBuilder in worker that just returns GameState+prev_action somehow?
-        obss = [obs_builder.build_obs(p, game_states[0], env_actions[i][0])
+
+        obss = [obs_builder.build_obs(p, game_states[0], np.zeros(8))
                 for i, p in enumerate(game_states[0].players)]
-        for s, gs in enumerate(game_states[1:], start=1):  # Start at 1 to keep env actions correct
+        for s, gs in enumerate(game_states[1:]):
             final = s == len(game_states) - 1
             old_obs = obss
             obss = []
             for i, player in enumerate(gs.players):
-                obs = obs_builder.build_obs(player, gs, env_actions[i][s])
+                obs = obs_builder.build_obs(player, gs, env_actions[s][i])
                 if final:
-                    rew = rew_func.get_final_reward(player, gs, env_actions[i][s])
+                    rew = rew_func.get_final_reward(player, gs, env_actions[s][i])
                 else:
-                    rew = rew_func.get_reward(player, gs, env_actions[i][s])
+                    rew = rew_func.get_reward(player, gs, env_actions[s][i])
                 buffers[i].add_step(old_obs[i], actions[i][s], rew, final, log_probs[i][s], None)
                 obss.append(obs)
 
@@ -146,7 +144,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             self,
             redis: Redis,
             obs_build_factory: Callable[[], ObsBuilder],
-            rew_build_factory: Callable[[], RewardFunction],
+            rew_func_factory: Callable[[], RewardFunction],
+            act_parse_factory: Callable[[], ActionParser],
             save_every=10,
             logger=None,
             clear=True
@@ -167,16 +166,17 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
 
         self.contributors = Counter()  # No need to save, clears every iteration
         self.obs_build_func = obs_build_factory
-        self.rew_build_func = rew_build_factory
+        self.rew_func_factory = rew_func_factory
+        self.act_parse_factory = act_parse_factory
 
     @staticmethod
-    def _process_rollout(rollout_bytes, latest_version, policy, obs_build_func, rew_build_func):
+    def _process_rollout(rollout_bytes, latest_version, obs_build_func, rew_build_func, act_build_func):
         rollout_data, versions, uuid, name, result = _unserialize(rollout_bytes)
 
         if not any(version < 0 and abs(version - latest_version) <= 1 for version in versions):
             return
 
-        buffers = decode_buffers(rollout_data, policy, obs_build_func, rew_build_func)
+        buffers = decode_buffers(rollout_data, obs_build_func, rew_build_func, act_build_func)
         return buffers, versions, uuid, name, result
 
     def _update_ratings(self, name, versions, buffers, latest_version, result):
@@ -240,9 +240,9 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                         RedisRolloutGenerator._process_rollout,
                         data,
                         latest_version,
-                        _unserialize_model(self.redis.get(MODEL_LATEST)),
                         CloudpickleWrapper(self.obs_build_func),
-                        CloudpickleWrapper(self.rew_build_func)
+                        CloudpickleWrapper(self.rew_func_factory),
+                        CloudpickleWrapper(self.act_parse_factory)
                     ))
 
     def _add_opponent(self, agent):
@@ -336,7 +336,8 @@ class RedisRolloutWorker:
     Provides RedisRolloutGenerator with rollouts via a Redis server
     """
 
-    def __init__(self, redis: Redis, name: str, match: Match, current_version_prob=.9, display_only=False, send_gamestates=True):
+    def __init__(self, redis: Redis, name: str, match: Match, current_version_prob=.9, display_only=False,
+                 send_gamestates=True):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name

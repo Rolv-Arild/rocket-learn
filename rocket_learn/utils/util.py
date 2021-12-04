@@ -17,11 +17,11 @@ def generate_episode(env: Gym, policies: List[Policy]) -> (List[ExperienceBuffer
     """
     create experience buffer data by interacting with the environment(s)
     """
-    observations = env.reset()
+    observations, info = env.reset(return_info=True)
     done = False
 
     rollouts = [
-        ExperienceBuffer()
+        ExperienceBuffer(infos=[info])
         for _ in range(len(policies))
     ]
     ep_rews = [0 for _ in range(len(policies))]

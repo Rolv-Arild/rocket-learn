@@ -76,6 +76,7 @@ class PPO:
         self.running_rew_var = 1
         self.running_rew_count = 1e-4
 
+        self.total_steps = 0
         self.logger = logger
         self.logger.watch((self.agent.actor, self.agent.critic))
 
@@ -144,9 +145,10 @@ class PPO:
                 self.save(current_run_dir, iteration)  # noqa
             
             self.rollout_generator.update_parameters(self.agent.actor)
-            
+
+            self.total_steps += self.n_steps  # size
             t1 = time.time()
-            self.logger.log({"fps": self.n_steps / (t1 - t0)})
+            self.logger.log({"fps": self.n_steps / (t1 - t0), "total_timesteps": self.total_steps})
 
     def set_logger(self, logger):
         self.logger = logger
@@ -355,7 +357,8 @@ class PPO:
         self.agent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         
         if continue_iterations:
-            self.starting_iteration = checkpoint['epoch']    
+            self.starting_iteration = checkpoint['epoch']
+            self.total_steps = checkpoint["total_steps"]
             print("Continuing training at iteration " + str(self.starting_iteration))
 
     def save(self, save_location, current_step):
@@ -372,6 +375,7 @@ class PPO:
 
         torch.save({
             'epoch': current_step,
+            "total_steps": self.total_steps,
             'actor_state_dict': self.agent.actor.state_dict(),
             'critic_state_dict': self.agent.critic.state_dict(),
             # 'shared_state_dict': self.agent.shared.state_dict(),
