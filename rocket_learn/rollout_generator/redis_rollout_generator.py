@@ -1,5 +1,7 @@
 import functools
+import itertools
 import os
+import random
 import zlib
 from concurrent.futures import ProcessPoolExecutor
 from threading import Thread
@@ -23,7 +25,7 @@ from redis.exceptions import ResponseError
 from rlgym.utils import ObsBuilder, RewardFunction
 from rlgym.utils.action_parsers import ActionParser
 from rlgym.utils.obs_builders import AdvancedObs
-from trueskill import Rating, rate, match_quality
+from trueskill import Rating, rate, match_quality, BETA
 import plotly.graph_objs as go
 
 from rlgym.envs import Match
@@ -111,7 +113,7 @@ def decode_buffers(enc_buffers, obs_build_factory=None, rew_func_factory=None, a
         obss = [obs_builder.build_obs(p, game_states[0], np.zeros(8))
                 for i, p in enumerate(game_states[0].players)]
         for s, gs in enumerate(game_states[1:]):
-            final = s == len(game_states) - 1
+            final = s == len(game_states) - 2
             old_obs = obss
             obss = []
             for i, player in enumerate(gs.players):
@@ -162,6 +164,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         else:
             if self.redis.exists(ROLLOUTS) > 0:
                 self.redis.delete(ROLLOUTS)
+            self.redis.decr(VERSION_LATEST, 2)  # In case of reload from old version, don't let current seep in
 
         self.redis.set(SAVE_FREQ, save_every)
         self.contributors = Counter()  # No need to save, clears every iteration
@@ -183,12 +186,13 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         ratings = []
         relevant_buffers = []
         for version, buffer in zip(versions, buffers):
-            if version < 0 and abs(version - latest_version) <= 1:
-                rating = Rating(*_unserialize(self.redis.get(QUALITY_LATEST)))
-                relevant_buffers.append(buffer)
-                self.contributors[name] += buffer.size()
-            elif version < 0:
-                return []
+            if version < 0:
+                if abs(version - latest_version) <= 1:
+                    rating = Rating(*_unserialize(self.redis.get(QUALITY_LATEST)))
+                    relevant_buffers.append(buffer)
+                    self.contributors[name] += buffer.size()
+                else:
+                    return []
             else:
                 rating = Rating(*_unserialize(self.redis.lindex(QUALITIES, version)))
             ratings.append(rating)
@@ -207,8 +211,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
 
         for version, ratings in ratings_versions.items():
             avg_rating = Rating((sum(r.mu for r in ratings) / len(ratings)),
-                                (sum(r.sigma ** 2 for r in ratings) / len(ratings)) ** 0.5)  # Average vars
-            if version > 0:  # Old
+                                (sum(r.sigma ** 2 for r in ratings) ** 0.5 / len(ratings)))  # Average vars
+            if version >= 0:  # Old
                 self.redis.lset(QUALITIES, version, _serialize(tuple(avg_rating)))
             elif version == latest_version:
                 self.redis.set(QUALITY_LATEST, _serialize(tuple(avg_rating)))
@@ -252,7 +256,9 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         ratings = [Rating(*_unserialize(v)) for v in self.redis.lrange(QUALITIES, 0, -1)]
         if ratings:
             mus = np.array([r.mu for r in ratings])
+            mus = mus - mus[0]
             sigmas = np.array([r.sigma for r in ratings])
+            sigmas[1:] = (sigmas[1:] ** 2 + sigmas[0] ** 2) ** 0.5
 
             x = np.arange(len(mus))
             y = mus
@@ -287,7 +293,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             }, commit=False)
             quality = Rating(ratings[-1].mu)  # Same mu, reset sigma
         else:
-            quality = Rating(0, 1)  # First agent is fixed at 0
+            quality = Rating(0, 1)  # First (typically random) agent is initialized at 0
         self.redis.rpush(QUALITIES, _serialize(tuple(quality)))
 
     def update_parameters(self, new_params):
@@ -357,15 +363,25 @@ class RedisRolloutWorker:
         self.n_agents = self.match.agents
         self.display_only = display_only
 
-    def _get_opponent_indices(self, n):
+    def _get_opponent_indices(self, n_new, n_old):
+        setup = [False] * n_new + [True] * n_old
+        random.shuffle(setup)
         # Get qualities
         # sum priorities to have higher chance of selecting high sigma
         ratings = [Rating(*_unserialize(v)) for v in self.redis.lrange(QUALITIES, 0, -1)]
-        qualities = np.array([match_quality([r, ratings[-1]]) for r in ratings])
-        # Pick opponent
-        probs = qualities / qualities.sum()
-        indices = np.random.choice(len(probs), n, p=probs)
-        return indices
+        best_matchup = None
+        best_quality = -1
+        for it in range(round(len(ratings) ** 0.5)):
+            matchup = np.full(len(setup), -1)
+            versions = np.random.choice(len(ratings), size=n_old)
+            matchup[setup] = versions
+            it_ratings = [ratings[v] for v in matchup]
+            mid = len(it_ratings) // 2
+            quality = match_quality((it_ratings[:mid], it_ratings[mid:]))
+            if quality > best_quality:
+                best_matchup = matchup
+                best_quality = quality
+        return best_matchup
 
     @functools.lru_cache(maxsize=8)
     def _get_past_model(self, version):
@@ -400,31 +416,32 @@ class RedisRolloutWorker:
             n += 1
 
             # TODO customizable past agent selection, should team only be same agent?
-            agents = [(self.current_agent, latest_version)]  # Use at least one current agent
+            if self.n_agents > 1 \
+                    and np.random.random() > self.current_version_prob:
+                n_old = np.random.binomial(n=self.n_agents - 2, p=0.5) + 1
+            else:
+                n_old = 0
 
-            if self.n_agents > 1:
-                # Ensure final proportion is same
-                adjusted_prob = (self.current_version_prob * self.n_agents - 1) / (self.n_agents - 1)
-                n_old = np.random.binomial(n=self.n_agents - 1, p=1 - adjusted_prob)
-                n_new = self.n_agents - n_old - 1
-                old_versions = self._get_opponent_indices(n_old)
-                for _ in range(n_new):
-                    version = latest_version
-                    selected_agent = self.current_agent
-                    agents.append((selected_agent, version))
-
-                for index in old_versions:
-                    version = int(index)
+            n_new = self.n_agents - n_old
+            versions = self._get_opponent_indices(n_new, n_old)
+            agents = []
+            for version in versions:
+                if version == -1:
+                    agents.append((self.current_agent, latest_version))
+                else:
                     selected_agent = self._get_past_model(version)
                     agents.append((selected_agent, version))
 
-            np.random.shuffle(agents)
             print("Generating rollout with versions:", [v for a, v in agents])
 
             rollouts, result = util.generate_episode(self.env, [agent for agent, version in agents])
 
             if not self.display_only:
                 rollout_data = encode_buffers(rollouts, strict=self.send_gamestates)  # TODO change
+                # sanity_check = decode_buffers(rollout_data,
+                #                               lambda: self.match._obs_builder,
+                #                               lambda: self.match._reward_fn,
+                #                               lambda: self.match._action_parser)
                 versions = [version for agent, version in agents]
                 rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result))
                 t.join()
