@@ -225,7 +225,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         #     if relevant_buffers is not None:
         #         yield from relevant_buffers
         futures = []
-        with ProcessPoolExecutor() as ex:
+        with ProcessPoolExecutor(8) as ex:
             while True:
                 # Kinda scuffed ngl
 
@@ -445,5 +445,12 @@ class RedisRolloutWorker:
                 versions = [version for agent, version in agents]
                 rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result))
                 t.join()
-                t = Thread(target=lambda: self.redis.rpush(ROLLOUTS, rollout_bytes))
+
+                def send():
+                    n_items = self.redis.rpush(ROLLOUTS, rollout_bytes)
+                    if n_items >= 1000:
+                        print("Had to limit rollouts. Learner may have have crashed, or is overloaded")
+                        self.redis.ltrim(ROLLOUTS, -100, -1)
+
+                t = Thread(target=send)
                 t.start()
