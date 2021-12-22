@@ -379,7 +379,7 @@ class RedisRolloutWorker:
             mid = len(it_ratings) // 2
             quality = match_quality((it_ratings[:mid], it_ratings[mid:]))
             if quality > best_quality:
-                best_matchup = matchup
+                best_matchup = [int(v) for v in matchup]
                 best_quality = quality
         return best_matchup
 
