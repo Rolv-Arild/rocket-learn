@@ -25,4 +25,3 @@ RLGym training tool
   - Need to come to agreement on config (architecture, reward func, parameters etc.)
 - Known issues
   - Sometimes very short episodes appear (<10 frames), seemingly without any reason
-  - TrueSkill does not update
