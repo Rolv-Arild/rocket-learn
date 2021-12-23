@@ -25,7 +25,7 @@ from redis.exceptions import ResponseError
 from rlgym.utils import ObsBuilder, RewardFunction
 from rlgym.utils.action_parsers import ActionParser
 from rlgym.utils.obs_builders import AdvancedObs
-from trueskill import Rating, rate, match_quality, BETA
+from trueskill import Rating, rate, match_quality, BETA, global_env
 import plotly.graph_objs as go
 
 from rlgym.envs import Match
@@ -337,6 +337,27 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                 print("redis manual save aborted, save already in progress")
 
 
+def probability_NvsM(team1_ratings, team2_ratings, env=None):
+    # Trueskill extension, source: https://github.com/sublee/trueskill/pull/17
+    """Calculates the win probability of the first team over the second team.
+    :param team1_ratings: ratings of the first team participants.
+    :param team2_ratings: ratings of another team participants.
+    :param env: the :class:`TrueSkill` object.  Defaults to the global
+                environment.
+    """
+    if env is None:
+        env = global_env()
+
+    team1_mu = sum(r.mu for r in team1_ratings)
+    team1_sigma = sum((env.beta**2 + r.sigma**2) for r in team1_ratings)
+    team2_mu = sum(r.mu for r in team2_ratings)
+    team2_sigma = sum((env.beta**2 + r.sigma**2) for r in team2_ratings)
+
+    x = (team1_mu - team2_mu) / np.sqrt(team1_sigma + team2_sigma)
+    probability_win_team1 = env.cdf(x)
+    return probability_win_team1
+
+
 class RedisRolloutWorker:
     """
     Provides RedisRolloutGenerator with rollouts via a Redis server
@@ -377,7 +398,7 @@ class RedisRolloutWorker:
             matchup[setup] = versions
             it_ratings = [ratings[v] for v in matchup]
             mid = len(it_ratings) // 2
-            quality = match_quality((it_ratings[:mid], it_ratings[mid:]))
+            quality = abs(0.5 - probability_NvsM(it_ratings[:mid], it_ratings[mid:]))
             if quality > best_quality:
                 best_matchup = [int(v) for v in matchup]
                 best_quality = quality
