@@ -1,5 +1,4 @@
 import functools
-import itertools
 import os
 import random
 import zlib
@@ -24,8 +23,7 @@ from redis import Redis
 from redis.exceptions import ResponseError
 from rlgym.utils import ObsBuilder, RewardFunction
 from rlgym.utils.action_parsers import ActionParser
-from rlgym.utils.obs_builders import AdvancedObs
-from trueskill import Rating, rate, match_quality, BETA, global_env
+from trueskill import Rating, rate
 import plotly.graph_objs as go
 
 from rlgym.envs import Match
@@ -35,7 +33,7 @@ from rlgym.utils.gamestates import GameState
 from rocket_learn.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
 from rocket_learn.utils import util
-from rocket_learn.utils.util import softmax, encode_gamestate
+from rocket_learn.utils.util import encode_gamestate, probability_NvsM
 
 # Constants for consistent key lookup
 QUALITIES = "qualities"
@@ -258,7 +256,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             mus = np.array([r.mu for r in ratings])
             mus = mus - mus[0]
             sigmas = np.array([r.sigma for r in ratings])
-            sigmas[1:] = (sigmas[1:] ** 2 + sigmas[0] ** 2) ** 0.5
+            # sigmas[1:] = (sigmas[1:] ** 2 + sigmas[0] ** 2) ** 0.5
 
             x = np.arange(len(mus))
             y = mus
@@ -335,27 +333,6 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                 self.redis.save()
             except ResponseError:
                 print("redis manual save aborted, save already in progress")
-
-
-def probability_NvsM(team1_ratings, team2_ratings, env=None):
-    # Trueskill extension, source: https://github.com/sublee/trueskill/pull/17
-    """Calculates the win probability of the first team over the second team.
-    :param team1_ratings: ratings of the first team participants.
-    :param team2_ratings: ratings of another team participants.
-    :param env: the :class:`TrueSkill` object.  Defaults to the global
-                environment.
-    """
-    if env is None:
-        env = global_env()
-
-    team1_mu = sum(r.mu for r in team1_ratings)
-    team1_sigma = sum((env.beta**2 + r.sigma**2) for r in team1_ratings)
-    team2_mu = sum(r.mu for r in team2_ratings)
-    team2_sigma = sum((env.beta**2 + r.sigma**2) for r in team2_ratings)
-
-    x = (team1_mu - team2_mu) / np.sqrt(team1_sigma + team2_sigma)
-    probability_win_team1 = env.cdf(x)
-    return probability_win_team1
 
 
 class RedisRolloutWorker:
@@ -437,11 +414,11 @@ class RedisRolloutWorker:
             n += 1
 
             # TODO customizable past agent selection, should team only be same agent?
-            if self.n_agents > 1 \
-                    and np.random.random() > self.current_version_prob:
-                n_old = np.random.binomial(n=self.n_agents - 2, p=0.5) + 1
-            else:
-                n_old = 0
+            n_old = 0
+            if self.n_agents > 1:
+                r = np.random.random()
+                if r > self.current_version_prob:
+                    n_old = np.random.binomial(n=self.n_agents, p=0.5)
 
             n_new = self.n_agents - n_old
             versions = self._get_opponent_indices(n_new, n_old)
