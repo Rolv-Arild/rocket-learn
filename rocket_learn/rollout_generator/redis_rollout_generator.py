@@ -15,6 +15,7 @@ import msgpack
 import msgpack_numpy as m
 import numpy as np
 # import matplotlib.pyplot  # noqa
+import psutil
 import wandb
 # from matplotlib.axes import Axes
 # from matplotlib.figure import Figure
@@ -223,7 +224,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         #     if relevant_buffers is not None:
         #         yield from relevant_buffers
         futures = []
-        with ProcessPoolExecutor(8) as ex:
+        with ProcessPoolExecutor(psutil.cpu_count(logical=False)) as ex:
             while True:
                 # Kinda scuffed ngl
 
@@ -435,7 +436,7 @@ class RedisRolloutWorker:
 
             rollouts, result = util.generate_episode(self.env, [agent for agent, version in agents])
 
-            state = rollouts[0]["info"]["state"]
+            state = rollouts[0].infos[-1]["state"]
             goal_speed = np.linal.norm(state.ball.linear_velocity) * 0.036  # kph
             str_result = ('+' + result if result > 0 else str(result))
             post_stats = f"Rollout finished after {len(rollouts[0])} steps, result was {str_result}"
