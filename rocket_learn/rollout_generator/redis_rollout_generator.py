@@ -289,7 +289,9 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             self.logger.log({
                 "qualities": fig,
             }, commit=False)
-            quality = Rating(ratings[-1].mu)  # Same mu, reset sigma
+            # quality = Rating(ratings[-1].mu, 2 * ratings[-1].sigma)
+            quality = Rating(_unserialize(self.redis.get(QUALITY_LATEST)))  # Same mu, reset sigma
+            self.redis.set(QUALITY_LATEST, _serialize(tuple(Rating(_unserialize(self.redis.get(QUALITY_LATEST))[0]))))
         else:
             quality = Rating(0, 1)  # First (typically random) agent is initialized at 0
         self.redis.rpush(QUALITIES, _serialize(tuple(quality)))
@@ -303,7 +305,6 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.redis.set(MODEL_LATEST, model_bytes)
         self.redis.decr(VERSION_LATEST)
         # Same mu, reset sigma
-        self.redis.set(QUALITY_LATEST, _serialize(tuple(Rating(_unserialize(self.redis.get(QUALITY_LATEST))[0]))))
 
         # TODO Idea: workers send name to identify who contributed rollouts,
         # keep track of top rollout contributors (each param update and total)
@@ -433,6 +434,14 @@ class RedisRolloutWorker:
             print("Generating rollout with versions:", [v for a, v in agents])
 
             rollouts, result = util.generate_episode(self.env, [agent for agent, version in agents])
+
+            state = rollouts[0]["info"]["state"]
+            goal_speed = np.linal.norm(state.ball.linear_velocity) * 0.036  # kph
+            str_result = ('+' + result if result > 0 else str(result))
+            post_stats = f"Rollout finished after {len(rollouts[0])} steps, result was {str_result}"
+            if result != 0:
+                post_stats += f", goal speed: {goal_speed} kph"
+            print(post_stats)
 
             if not self.display_only:
                 rollout_data = encode_buffers(rollouts, strict=self.send_gamestates)  # TODO change
