@@ -437,7 +437,7 @@ class RedisRolloutWorker:
             rollouts, result = util.generate_episode(self.env, [agent for agent, version in agents])
 
             state = rollouts[0].infos[-1]["state"]
-            goal_speed = np.linal.norm(state.ball.linear_velocity) * 0.036  # kph
+            goal_speed = np.linalg.norm(state.ball.linear_velocity) * 0.036  # kph
             str_result = ('+' + result if result > 0 else str(result))
             post_stats = f"Rollout finished after {len(rollouts[0])} steps, result was {str_result}"
             if result != 0:
