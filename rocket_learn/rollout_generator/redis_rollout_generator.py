@@ -148,7 +148,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             act_parse_factory: Callable[[], ActionParser],
             save_every=10,
             logger=None,
-            clear=True
+            clear=True,
+            mmr_min_episode_length=150
     ):
         self.tot_bytes = 0
         self.redis = redis
@@ -169,6 +170,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.obs_build_func = obs_build_factory
         self.rew_func_factory = rew_func_factory
         self.act_parse_factory = act_parse_factory
+        self.mmr_min_episode_length = mmr_min_episode_length
 
     @staticmethod
     def _process_rollout(rollout_bytes, latest_version, obs_build_func, rew_build_func, act_build_func):
@@ -199,21 +201,22 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         blue = tuple(ratings[:blue_players])  # Tuple is important
         orange = tuple(ratings[blue_players:])
 
-        # In ranks lowest number is best, result=-1 is orange win, 0 tie, 1 blue
-        r1, r2 = rate((blue, orange), ranks=(0, result))
+        if self.mmr_min_episode_length is None or len(buffers[0].observations) >= self.mmr_min_episode_length:
+            # In ranks lowest number is best, result=-1 is orange win, 0 tie, 1 blue
+            r1, r2 = rate((blue, orange), ranks=(0, result))
 
-        # Some trickery to handle same rating appearing multiple times, we just average their new mus and sigmas
-        ratings_versions = {}
-        for rating, version in zip(r1 + r2, versions):
-            ratings_versions.setdefault(version, []).append(rating)
+            # Some trickery to handle same rating appearing multiple times, we just average their new mus and sigmas
+            ratings_versions = {}
+            for rating, version in zip(r1 + r2, versions):
+                ratings_versions.setdefault(version, []).append(rating)
 
-        for version, ratings in ratings_versions.items():
-            avg_rating = Rating((sum(r.mu for r in ratings) / len(ratings)),
-                                (sum(r.sigma ** 2 for r in ratings) ** 0.5 / len(ratings)))  # Average vars
-            if version >= 0:  # Old
-                self.redis.lset(QUALITIES, version, _serialize(tuple(avg_rating)))
-            elif version == latest_version:
-                self.redis.set(QUALITY_LATEST, _serialize(tuple(avg_rating)))
+            for version, ratings in ratings_versions.items():
+                avg_rating = Rating((sum(r.mu for r in ratings) / len(ratings)),
+                                    (sum(r.sigma ** 2 for r in ratings) ** 0.5 / len(ratings)))  # Average vars
+                if version >= 0:  # Old
+                    self.redis.lset(QUALITIES, version, _serialize(tuple(avg_rating)))
+                elif version == latest_version:
+                    self.redis.set(QUALITY_LATEST, _serialize(tuple(avg_rating)))
 
         return relevant_buffers
 
