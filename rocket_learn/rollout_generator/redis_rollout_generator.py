@@ -24,7 +24,7 @@ from redis import Redis
 from redis.exceptions import ResponseError
 from rlgym.utils import ObsBuilder, RewardFunction
 from rlgym.utils.action_parsers import ActionParser
-from trueskill import Rating, rate
+from trueskill import Rating, rate, SIGMA
 import plotly.graph_objs as go
 
 from rlgym.envs import Match
@@ -43,14 +43,13 @@ SAVE_FREQ = "save-freq"
 
 MODEL_LATEST = "model-latest"
 VERSION_LATEST = "model-version"
-QUALITY_LATEST = "model-rating"
 
 ROLLOUTS = "rollout"
 OPPONENT_MODELS = "opponent-models"
 WORKER_IDS = "worker-ids"
 CONTRIBUTORS = "contributors"
 _ALL = (
-    QUALITIES, N_UPDATES, SAVE_FREQ, MODEL_LATEST, ROLLOUTS, VERSION_LATEST, QUALITY_LATEST, OPPONENT_MODELS,
+    QUALITIES, N_UPDATES, SAVE_FREQ, MODEL_LATEST, VERSION_LATEST, ROLLOUTS, OPPONENT_MODELS,
     WORKER_IDS, CONTRIBUTORS)
 
 m.patch()
@@ -160,7 +159,6 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         if clear:
             self.redis.delete(*_ALL)
             self.redis.set(N_UPDATES, 0)
-            self.redis.set(QUALITY_LATEST, _serialize((0, 1)))
         else:
             if self.redis.exists(ROLLOUTS) > 0:
                 self.redis.delete(ROLLOUTS)
@@ -189,35 +187,31 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         for version, buffer in zip(versions, buffers):
             if version < 0:
                 if abs(version - latest_version) <= 1:
-                    rating = Rating(*_unserialize(self.redis.get(QUALITY_LATEST)))
                     relevant_buffers.append(buffer)
                     self.contributors[name] += buffer.size()
                 else:
                     return []
             else:
                 rating = Rating(*_unserialize(self.redis.lindex(QUALITIES, version)))
-            ratings.append(rating)
+                ratings.append(rating)
+        if len(ratings) == len(versions):  # Only old versions, calculate MMR
+            blue_players = sum(divmod(len(ratings), 2))
+            blue = tuple(ratings[:blue_players])  # Tuple is important
+            orange = tuple(ratings[blue_players:])
 
-        blue_players = sum(divmod(len(ratings), 2))
-        blue = tuple(ratings[:blue_players])  # Tuple is important
-        orange = tuple(ratings[blue_players:])
+            if self.mmr_min_episode_length is None or len(buffers[0].observations) >= self.mmr_min_episode_length:
+                # In ranks lowest number is best, result=-1 is orange win, 0 tie, 1 blue
+                r1, r2 = rate((blue, orange), ranks=(0, result))
 
-        if self.mmr_min_episode_length is None or len(buffers[0].observations) >= self.mmr_min_episode_length:
-            # In ranks lowest number is best, result=-1 is orange win, 0 tie, 1 blue
-            r1, r2 = rate((blue, orange), ranks=(0, result))
+                # Some trickery to handle same rating appearing multiple times, we just average their new mus and sigmas
+                ratings_versions = {}
+                for rating, version in zip(r1 + r2, versions):
+                    ratings_versions.setdefault(version, []).append(rating)
 
-            # Some trickery to handle same rating appearing multiple times, we just average their new mus and sigmas
-            ratings_versions = {}
-            for rating, version in zip(r1 + r2, versions):
-                ratings_versions.setdefault(version, []).append(rating)
-
-            for version, ratings in ratings_versions.items():
-                avg_rating = Rating((sum(r.mu for r in ratings) / len(ratings)),
-                                    (sum(r.sigma ** 2 for r in ratings) ** 0.5 / len(ratings)))  # Average vars
-                if version >= 0:  # Old
+                for version, ratings in ratings_versions.items():
+                    avg_rating = Rating((sum(r.mu for r in ratings) / len(ratings)),
+                                        (sum(r.sigma ** 2 for r in ratings) ** 0.5 / len(ratings)))  # Average vars
                     self.redis.lset(QUALITIES, version, _serialize(tuple(avg_rating)))
-                elif version == latest_version:
-                    self.redis.set(QUALITY_LATEST, _serialize(tuple(avg_rating)))
 
         return relevant_buffers
 
@@ -293,9 +287,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             self.logger.log({
                 "qualities": fig,
             }, commit=False)
-            # quality = Rating(ratings[-1].mu, 2 * ratings[-1].sigma)
-            quality = Rating(_unserialize(self.redis.get(QUALITY_LATEST)))  # Same mu, reset sigma
-            self.redis.set(QUALITY_LATEST, _serialize(tuple(Rating(_unserialize(self.redis.get(QUALITY_LATEST))[0]))))
+            quality = Rating(ratings[-1].mu, min(2 * ratings[-1].sigma, SIGMA))
         else:
             quality = Rating(0, 1)  # First (typically random) agent is initialized at 0
         self.redis.rpush(QUALITIES, _serialize(tuple(quality)))
@@ -423,7 +415,7 @@ class RedisRolloutWorker:
             if self.n_agents > 1:
                 r = np.random.random()
                 if r > self.current_version_prob:
-                    n_old = np.random.binomial(n=self.n_agents, p=0.5)
+                    n_old = np.random.randint(low=0, high=self.n_agents + 1)
 
             n_new = self.n_agents - n_old
             versions = self._get_opponent_indices(n_new, n_old)
