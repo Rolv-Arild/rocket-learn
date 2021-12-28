@@ -175,7 +175,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
     def _process_rollout(rollout_bytes, latest_version, obs_build_func, rew_build_func, act_build_func):
         rollout_data, versions, uuid, name, result = _unserialize(rollout_bytes)
 
-        if not any(version < 0 and abs(version - latest_version) <= 1 for version in versions):
+        if any(version < 0 and abs(version - latest_version) > 1 for version in versions):
             return
 
         buffers = decode_buffers(rollout_data, obs_build_func, rew_build_func, act_build_func)
@@ -194,24 +194,27 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             else:
                 rating = Rating(*_unserialize(self.redis.lindex(QUALITIES, version)))
                 ratings.append(rating)
-        if len(ratings) == len(versions):  # Only old versions, calculate MMR
+
+        # Only old versions, calculate MMR
+        if len(ratings) == len(versions) \
+                and (self.mmr_min_episode_length is None
+                     or len(buffers[0].observations) >= self.mmr_min_episode_length):
             blue_players = sum(divmod(len(ratings), 2))
             blue = tuple(ratings[:blue_players])  # Tuple is important
             orange = tuple(ratings[blue_players:])
 
-            if self.mmr_min_episode_length is None or len(buffers[0].observations) >= self.mmr_min_episode_length:
-                # In ranks lowest number is best, result=-1 is orange win, 0 tie, 1 blue
-                r1, r2 = rate((blue, orange), ranks=(0, result))
+            # In ranks lowest number is best, result=-1 is orange win, 0 tie, 1 blue
+            r1, r2 = rate((blue, orange), ranks=(0, result))
 
-                # Some trickery to handle same rating appearing multiple times, we just average their new mus and sigmas
-                ratings_versions = {}
-                for rating, version in zip(r1 + r2, versions):
-                    ratings_versions.setdefault(version, []).append(rating)
+            # Some trickery to handle same rating appearing multiple times, we just average their new mus and sigmas
+            ratings_versions = {}
+            for rating, version in zip(r1 + r2, versions):
+                ratings_versions.setdefault(version, []).append(rating)
 
-                for version, ratings in ratings_versions.items():
-                    avg_rating = Rating((sum(r.mu for r in ratings) / len(ratings)),
-                                        (sum(r.sigma ** 2 for r in ratings) ** 0.5 / len(ratings)))  # Average vars
-                    self.redis.lset(QUALITIES, version, _serialize(tuple(avg_rating)))
+            for version, ratings in ratings_versions.items():
+                avg_rating = Rating((sum(r.mu for r in ratings) / len(ratings)),
+                                    (sum(r.sigma ** 2 for r in ratings) ** 0.5 / len(ratings)))  # Average vars
+                self.redis.lset(QUALITIES, version, _serialize(tuple(avg_rating)))
 
         return relevant_buffers
 
