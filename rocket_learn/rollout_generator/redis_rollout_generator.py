@@ -237,19 +237,30 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         #         yield from relevant_buffers
         futures = []
         with ProcessPoolExecutor(psutil.cpu_count(logical=False)) as ex:
+            datas = []
             while True:
                 # Kinda scuffed ngl
+                if len(datas) <= 0:
+                    pipe = self.redis.pipeline()
+                    pipe.lrange(ROLLOUTS, 0, 100)
+                    pipe.ltrim(ROLLOUTS, 0, 100)
+                    datas = pipe.execute()[0]
+                    time.sleep(n)  # Let's not make too many requests
+                    n = min(n + 1, 10)
 
                 if len(futures) > 0 and futures[0].done():
+                    n = 0
                     res = futures.pop(0).result()
                     if res is not None:
                         latest_version = int(self.redis.get(VERSION_LATEST))
                         buffers, versions, uuid, name, result = res
                         relevant_buffers = self._update_ratings(name, versions, buffers, latest_version, result)
                         yield from relevant_buffers
-                elif len(futures) < os.cpu_count():
+                elif len(futures) < os.cpu_count() and len(datas) > 0:
+                    n = 0
                     latest_version = int(self.redis.get(VERSION_LATEST))
-                    data = self.redis.blpop(ROLLOUTS)[1]
+                    data = datas.pop(0)
+                    # data = self.redis.blpop(ROLLOUTS)[1]
                     self.tot_bytes += len(data)
                     futures.append(ex.submit(
                         RedisRolloutGenerator._process_rollout,
