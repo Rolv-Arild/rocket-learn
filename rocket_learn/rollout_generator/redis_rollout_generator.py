@@ -131,7 +131,7 @@ def decode_buffers(enc_buffers, encoded, obs_build_factory=None, rew_func_factor
                     else:
                         rew = rew_func.get_reward(player, gs, env_actions[s][i])
                 else:
-                    rew = rewards[s][i]
+                    rew = rewards[i][s]
                 buffers[i].add_step(old_obs[i], actions[i][s], rew, final, log_probs[i][s], None)
                 obss.append(obs)
 
