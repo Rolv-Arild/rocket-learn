@@ -76,11 +76,14 @@ def _unserialize_model(buf):
     return agent
 
 
-def encode_buffers(buffers: List[ExperienceBuffer], strict=False):
+def encode_buffers(buffers: List[ExperienceBuffer], strict=False, send_rewards=True):
     if strict:
         states = np.asarray([encode_gamestate(info["state"]) for info in buffers[0].infos])
         actions = np.asarray([buffer.actions for buffer in buffers])
         log_probs = np.asarray([buffer.log_probs for buffer in buffers])
+        if send_rewards:
+            rewards = np.asarray([buffer.rewards for buffer in buffers])
+            return states, actions, log_probs, rewards
         return states, actions, log_probs
     else:
         return [
@@ -89,11 +92,17 @@ def encode_buffers(buffers: List[ExperienceBuffer], strict=False):
         ]
 
 
-def decode_buffers(enc_buffers, obs_build_factory=None, rew_func_factory=None, act_parse_factory=None):
-    if len(enc_buffers) == 3:
-        game_states, actions, log_probs = enc_buffers
+def decode_buffers(enc_buffers, encoded, obs_build_factory=None, rew_func_factory=None, act_parse_factory=None):
+    if encoded:
+        if len(enc_buffers) == 3:
+            game_states, actions, log_probs = enc_buffers
+            rewards = None
+        elif len(enc_buffers) == 4:
+            game_states, actions, log_probs, rewards = enc_buffers
+        else:
+            raise ValueError
         game_states = [GameState(gs.tolist()) for gs in game_states]
-        obs_builder = obs_build_factory()
+        obs_builder = obs_build_factory()  # TODO add subclass for batch processing, use if available
         rew_func = rew_func_factory()
         act_parser = act_parse_factory()
         obs_builder.reset(game_states[0])
@@ -116,10 +125,13 @@ def decode_buffers(enc_buffers, obs_build_factory=None, rew_func_factory=None, a
             obss = []
             for i, player in enumerate(gs.players):
                 obs = obs_builder.build_obs(player, gs, env_actions[s][i])
-                if final:
-                    rew = rew_func.get_final_reward(player, gs, env_actions[s][i])
+                if rewards is None:
+                    if final:
+                        rew = rew_func.get_final_reward(player, gs, env_actions[s][i])
+                    else:
+                        rew = rew_func.get_reward(player, gs, env_actions[s][i])
                 else:
-                    rew = rew_func.get_reward(player, gs, env_actions[s][i])
+                    rew = rewards[s][i]
                 buffers[i].add_step(old_obs[i], actions[i][s], rew, final, log_probs[i][s], None)
                 obss.append(obs)
 
@@ -173,12 +185,12 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
 
     @staticmethod
     def _process_rollout(rollout_bytes, latest_version, obs_build_func, rew_build_func, act_build_func):
-        rollout_data, versions, uuid, name, result = _unserialize(rollout_bytes)
+        rollout_data, versions, uuid, name, result, encoded = _unserialize(rollout_bytes)
 
         if any(version < 0 and abs(version - latest_version) > 1 for version in versions):
             return
 
-        buffers = decode_buffers(rollout_data, obs_build_func, rew_build_func, act_build_func)
+        buffers = decode_buffers(rollout_data, encoded, obs_build_func, rew_build_func, act_build_func)
         return buffers, versions, uuid, name, result
 
     def _update_ratings(self, name, versions, buffers, latest_version, result):
@@ -449,7 +461,8 @@ class RedisRolloutWorker:
                 #                               lambda: self.match._reward_fn,
                 #                               lambda: self.match._action_parser)
                 versions = [version for agent, version in agents]
-                rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result))
+                rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result,
+                                            self.send_gamestates))
                 t.join()
 
                 def send():
