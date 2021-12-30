@@ -13,6 +13,7 @@ from torch import nn
 
 from rocket_learn.agent.policy import Policy
 from rocket_learn.experience_buffer import ExperienceBuffer
+from rlgym.utils.terminal_conditions.common_conditions import GoalScoredCondition
 
 
 def generate_episode(env: Gym, policies: List[Policy], evaluate=False) -> (List[ExperienceBuffer], int):
@@ -24,7 +25,8 @@ def generate_episode(env: Gym, policies: List[Policy], evaluate=False) -> (List[
         state_setter = env._match._state_setter  # noqa
         terminals = env._match._terminal_conditions  # noqa
         reward = env._match._reward_fn  # noqa
-        env._match._terminal_conditions = [GameCondition(tick_skip=env._match._tick_skip)]  # noqa
+        game_condition = GameCondition(tick_skip=env._match._tick_skip)  # noqa
+        env._match._terminal_conditions = [game_condition, GoalScoredCondition()]  # noqa
         env._match._state_setter = DefaultState()  # noqa
         env._match._reward_fn = ConstantReward()  # noqa Save some cpu cycles
 
@@ -37,7 +39,7 @@ def generate_episode(env: Gym, policies: List[Policy], evaluate=False) -> (List[
     ]
     ep_rews = [0 for _ in range(len(policies))]
     with torch.no_grad():
-        while not done:
+        while True:
             all_indices = []
             all_actions = []
             all_log_probs = []
@@ -67,6 +69,14 @@ def generate_episode(env: Gym, policies: List[Policy], evaluate=False) -> (List[
 
             for i in range(len(policies)):
                 ep_rews[i] += rewards[i]
+
+            if done:
+                if not evaluate:
+                    break
+                elif game_condition.done:  # noqa
+                    break
+                else:
+                    observations, info = env.reset(return_info=True)
 
     result = info["result"]
 
