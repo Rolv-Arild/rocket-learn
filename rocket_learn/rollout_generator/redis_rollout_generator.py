@@ -442,11 +442,13 @@ class RedisRolloutWorker:
                     agents.append(selected_agent)
             versions = [v if v != -1 else latest_version for v in versions]
 
+            encode = self.send_gamestates
             if all(v >= 0 for v in versions):
                 print("Running evaluation game with versions:", versions)
                 result = util.generate_episode(self.env, agents, evaluate=True)
                 rollouts = []
                 print("Evaluation finished, goal differential:", result)
+                encode = False
             else:
                 print("Generating rollout with versions:", versions)
 
@@ -463,13 +465,13 @@ class RedisRolloutWorker:
                 print(post_stats)
 
             if not self.display_only:
-                rollout_data = encode_buffers(rollouts, strict=self.send_gamestates)  # TODO change
+                rollout_data = encode_buffers(rollouts, strict=encode)  # TODO change
                 # sanity_check = decode_buffers(rollout_data,
                 #                               lambda: self.match._obs_builder,
                 #                               lambda: self.match._reward_fn,
                 #                               lambda: self.match._action_parser)
                 rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result,
-                                            self.send_gamestates))
+                                            encode))
                 t.join()
 
                 def send():
