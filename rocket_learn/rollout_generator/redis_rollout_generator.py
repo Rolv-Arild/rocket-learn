@@ -237,8 +237,6 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         #         yield from relevant_buffers
         futures = []
         with ProcessPoolExecutor(psutil.cpu_count(logical=False)) as ex:
-            datas = []
-            idle = False
             while True:
                 # Kinda scuffed ngl
                 if len(futures) > 0 and futures[0].done():
@@ -248,28 +246,18 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                         buffers, versions, uuid, name, result = res
                         relevant_buffers = self._update_ratings(name, versions, buffers, latest_version, result)
                         yield from relevant_buffers
-                    idle = False
                 elif len(futures) < os.cpu_count():
-                    if len(datas) <= 0:
-                        datas = self.redis.lrange(ROLLOUTS, 0, 100)  # TODO replace with blpop, not transactional atm
-                        self.redis.ltrim(ROLLOUTS, len(datas), -1)  # Keep last items
-                        if idle:
-                            time.sleep(1)  # Let's not make too many requests
-                        idle = True
-                    else:
-                        latest_version = int(self.redis.get(VERSION_LATEST))
-                        data = datas.pop(0)
-                        # data = self.redis.blpop(ROLLOUTS)[1]
-                        self.tot_bytes += len(data)
-                        futures.append(ex.submit(
-                            RedisRolloutGenerator._process_rollout,
-                            data,
-                            latest_version,
-                            CloudpickleWrapper(self.obs_build_func),
-                            CloudpickleWrapper(self.rew_func_factory),
-                            CloudpickleWrapper(self.act_parse_factory)
-                        ))
-                        idle = False
+                    latest_version = int(self.redis.get(VERSION_LATEST))
+                    data = self.redis.blpop(ROLLOUTS)[1]
+                    self.tot_bytes += len(data)
+                    futures.append(ex.submit(
+                        RedisRolloutGenerator._process_rollout,
+                        data,
+                        latest_version,
+                        CloudpickleWrapper(self.obs_build_func),
+                        CloudpickleWrapper(self.rew_func_factory),
+                        CloudpickleWrapper(self.act_parse_factory)
+                    ))
 
     def _add_opponent(self, agent):
         # Add to list
