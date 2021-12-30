@@ -440,6 +440,7 @@ class RedisRolloutWorker:
                 else:
                     selected_agent = self._get_past_model(version)
                     agents.append(selected_agent)
+            versions = [v if v != -1 else latest_version for v in versions]
 
             if all(v >= 0 for v in versions):
                 print("Running evaluation game with versions:", versions)
@@ -450,6 +451,8 @@ class RedisRolloutWorker:
                 print("Generating rollout with versions:", versions)
 
                 rollouts, result = util.generate_episode(self.env, agents, evaluate=False)
+                if len(rollouts[0].observations) <= 1:
+                    rollouts, result = util.generate_episode(self.env, agents, evaluate=False)
 
                 state = rollouts[0].infos[-2]["state"]
                 goal_speed = np.linalg.norm(state.ball.linear_velocity) * 0.036  # kph

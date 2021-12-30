@@ -25,19 +25,21 @@ def generate_episode(env: Gym, policies: List[Policy], evaluate=False) -> (List[
         state_setter = env._match._state_setter  # noqa
         terminals = env._match._terminal_conditions  # noqa
         reward = env._match._reward_fn  # noqa
-        game_condition = GameCondition(tick_skip=env._match._tick_skip)  # noqa
+        game_condition = GameCondition(tick_skip=env._match._tick_skip,
+                                       forfeit_spg_limit=10 * env._match._team_size)  # noqa
         env._match._terminal_conditions = [game_condition, GoalScoredCondition()]  # noqa
         env._match._state_setter = DefaultState()  # noqa
         env._match._reward_fn = ConstantReward()  # noqa Save some cpu cycles
 
     observations, info = env.reset(return_info=True)
-    done = False
+    result = 0
 
     rollouts = [
         ExperienceBuffer(infos=[info])
         for _ in range(len(policies))
     ]
     ep_rews = [0 for _ in range(len(policies))]
+
     with torch.no_grad():
         while True:
             all_indices = []
@@ -71,14 +73,13 @@ def generate_episode(env: Gym, policies: List[Policy], evaluate=False) -> (List[
                 ep_rews[i] += rewards[i]
 
             if done:
+                result += info["result"]
                 if not evaluate:
                     break
                 elif game_condition.done:  # noqa
                     break
                 else:
                     observations, info = env.reset(return_info=True)
-
-    result = info["result"]
 
     if evaluate:
         env._match._terminal_conditions = terminals  # noqa
