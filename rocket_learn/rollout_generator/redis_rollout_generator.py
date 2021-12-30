@@ -241,37 +241,35 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             idle = False
             while True:
                 # Kinda scuffed ngl
-                if len(datas) <= 0:
-                    pipe = self.redis.pipeline()
-                    pipe.lrange(ROLLOUTS, 0, 100)
-                    pipe.ltrim(ROLLOUTS, 0, 100)
-                    datas = pipe.execute()[0]
-                    if idle:
-                        time.sleep(1)  # Let's not make too many requests
-                    idle = True
-
                 if len(futures) > 0 and futures[0].done():
-                    idle = False
                     res = futures.pop(0).result()
                     if res is not None:
                         latest_version = int(self.redis.get(VERSION_LATEST))
                         buffers, versions, uuid, name, result = res
                         relevant_buffers = self._update_ratings(name, versions, buffers, latest_version, result)
                         yield from relevant_buffers
-                elif len(futures) < os.cpu_count() and len(datas) > 0:
                     idle = False
-                    latest_version = int(self.redis.get(VERSION_LATEST))
-                    data = datas.pop(0)
-                    # data = self.redis.blpop(ROLLOUTS)[1]
-                    self.tot_bytes += len(data)
-                    futures.append(ex.submit(
-                        RedisRolloutGenerator._process_rollout,
-                        data,
-                        latest_version,
-                        CloudpickleWrapper(self.obs_build_func),
-                        CloudpickleWrapper(self.rew_func_factory),
-                        CloudpickleWrapper(self.act_parse_factory)
-                    ))
+                elif len(futures) < os.cpu_count():
+                    if len(datas) <= 0:
+                        datas = self.redis.lrange(ROLLOUTS, 0, 100)  # TODO replace with blpop, not transactional atm
+                        self.redis.ltrim(ROLLOUTS, len(datas), -1)  # Keep last items
+                        if idle:
+                            time.sleep(1)  # Let's not make too many requests
+                        idle = True
+                    else:
+                        latest_version = int(self.redis.get(VERSION_LATEST))
+                        data = datas.pop(0)
+                        # data = self.redis.blpop(ROLLOUTS)[1]
+                        self.tot_bytes += len(data)
+                        futures.append(ex.submit(
+                            RedisRolloutGenerator._process_rollout,
+                            data,
+                            latest_version,
+                            CloudpickleWrapper(self.obs_build_func),
+                            CloudpickleWrapper(self.rew_func_factory),
+                            CloudpickleWrapper(self.act_parse_factory)
+                        ))
+                        idle = False
 
     def _add_opponent(self, agent):
         # Add to list
