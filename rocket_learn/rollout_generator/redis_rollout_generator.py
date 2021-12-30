@@ -443,13 +443,13 @@ class RedisRolloutWorker:
 
             if all(v >= 0 for v in versions):
                 print("Running evaluation game with versions:", versions)
-                result = util.generate_episode(self.env, agents)
+                result = util.generate_episode(self.env, agents, evaluate=True)
                 rollouts = []
                 print("Evaluation finished, goal differential:", result)
             else:
                 print("Generating rollout with versions:", versions)
 
-                rollouts, result = util.generate_episode(self.env, agents)
+                rollouts, result = util.generate_episode(self.env, agents, evaluate=False)
 
                 state = rollouts[0].infos[-2]["state"]
                 goal_speed = np.linalg.norm(state.ball.linear_velocity) * 0.036  # kph
