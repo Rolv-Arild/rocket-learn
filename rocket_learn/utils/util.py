@@ -7,16 +7,27 @@ from rlgym.gym import Gym
 from rlgym.utils import ObsBuilder
 from rlgym.utils.gamestates import GameState, PlayerData
 from rlgym.utils.obs_builders import AdvancedObs
+from rlgym.utils.reward_functions.common_rewards import ConstantReward
+from rlgym.utils.state_setters import DefaultState
 from torch import nn
 
 from rocket_learn.agent.policy import Policy
 from rocket_learn.experience_buffer import ExperienceBuffer
 
 
-def generate_episode(env: Gym, policies: List[Policy]) -> (List[ExperienceBuffer], int):
+def generate_episode(env: Gym, policies: List[Policy], evaluate=False) -> (List[ExperienceBuffer], int):
     """
     create experience buffer data by interacting with the environment(s)
     """
+    if evaluate:  # Change setup temporarily to play a normal game (approximately)
+        from rlgym_tools.extra_terminals.game_condition import GameCondition  # tools is an optional dependency
+        state_setter = env._match._state_setter  # noqa
+        terminals = env._match._terminal_conditions  # noqa
+        reward = env._match._reward_fn  # noqa
+        env._match._terminal_conditions = [GameCondition(tick_skip=env._match._tick_skip)]  # noqa
+        env._match._state_setter = DefaultState()  # noqa
+        env._match._reward_fn = ConstantReward()  # noqa Save some cpu cycles
+
     observations, info = env.reset(return_info=True)
     done = False
 
@@ -58,7 +69,12 @@ def generate_episode(env: Gym, policies: List[Policy]) -> (List[ExperienceBuffer
                 ep_rews[i] += rewards[i]
 
     result = info["result"]
-    # result = 0 if abs(info["state"].ball.position[1]) < BALL_RADIUS else (2 * (info["state"].ball.position[1] > 0) - 1)
+
+    if evaluate:
+        env._match._terminal_conditions = terminals  # noqa
+        env._match._state_setter = state_setter  # noqa
+        env._match._reward_fn = reward  # noqa
+        return result
 
     return rollouts, result
 

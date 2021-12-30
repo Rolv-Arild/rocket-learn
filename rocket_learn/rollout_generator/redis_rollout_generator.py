@@ -1,4 +1,5 @@
 import functools
+import itertools
 import os
 import random
 import zlib
@@ -108,7 +109,7 @@ def decode_buffers(enc_buffers, encoded, obs_build_factory=None, rew_func_factor
         obs_builder.reset(game_states[0])
         rew_func.reset(game_states[0])
         buffers = [
-            ExperienceBuffer()
+            ExperienceBuffer(infos=[{"state": game_states[0]}])
             for _ in range(len(game_states[0].players))
         ]
 
@@ -132,7 +133,7 @@ def decode_buffers(enc_buffers, encoded, obs_build_factory=None, rew_func_factor
                         rew = rew_func.get_reward(player, gs, env_actions[s][i])
                 else:
                     rew = rewards[i][s]
-                buffers[i].add_step(old_obs[i], actions[i][s], rew, final, log_probs[i][s], None)
+                buffers[i].add_step(old_obs[i], actions[i][s], rew, final, log_probs[i][s], {"state": gs})
                 obss.append(obs)
 
         return buffers
@@ -196,7 +197,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
     def _update_ratings(self, name, versions, buffers, latest_version, result):
         ratings = []
         relevant_buffers = []
-        for version, buffer in zip(versions, buffers):
+        for version, buffer in itertools.zip_longest(versions, buffers):
             if version < 0:
                 if abs(version - latest_version) <= 1:
                     relevant_buffers.append(buffer)
@@ -208,9 +209,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                 ratings.append(rating)
 
         # Only old versions, calculate MMR
-        if len(ratings) == len(versions) \
-                and (self.mmr_min_episode_length is None
-                     or len(buffers[0].observations) >= self.mmr_min_episode_length):
+        if len(ratings) == len(versions) and len(buffers) == 0:
             blue_players = sum(divmod(len(ratings), 2))
             blue = tuple(ratings[:blue_players])  # Tuple is important
             orange = tuple(ratings[blue_players:])
@@ -376,13 +375,14 @@ class RedisRolloutWorker:
         setup = [False] * n_new + [True] * n_old
         random.shuffle(setup)
         # Get qualities
-        # sum priorities to have higher chance of selecting high sigma
         ratings = [Rating(*_unserialize(v)) for v in self.redis.lrange(QUALITIES, 0, -1)]
+        sigmas = np.array([r.sigma for r in ratings])
+        probs = sigmas / sigmas.sum()  # Have higher chance of selecting high sigma
         best_matchup = None
         best_quality = -1
         for it in range(round(len(ratings) ** 0.5)):
             matchup = np.full(len(setup), -1)
-            versions = np.random.choice(len(ratings), size=n_old)
+            versions = np.random.choice(len(ratings), size=n_old, p=probs)
             matchup[setup] = versions
             it_ratings = [ratings[v] for v in matchup]
             mid = len(it_ratings) // 2
@@ -436,22 +436,28 @@ class RedisRolloutWorker:
             agents = []
             for version in versions:
                 if version == -1:
-                    agents.append((self.current_agent, latest_version))
+                    agents.append(self.current_agent)
                 else:
                     selected_agent = self._get_past_model(version)
-                    agents.append((selected_agent, version))
+                    agents.append(selected_agent)
 
-            print("Generating rollout with versions:", [v for a, v in agents])
+            if all(v >= 0 for v in versions):
+                print("Running evaluation game with versions:", versions)
+                result = util.generate_episode(self.env, agents)
+                rollouts = []
+                print("Evaluation finished, goal differential:", result)
+            else:
+                print("Generating rollout with versions:", versions)
 
-            rollouts, result = util.generate_episode(self.env, [agent for agent, version in agents])
+                rollouts, result = util.generate_episode(self.env, agents)
 
-            state = rollouts[0].infos[-2]["state"]
-            goal_speed = np.linalg.norm(state.ball.linear_velocity) * 0.036  # kph
-            str_result = ('+' if result > 0 else "") + str(result)
-            post_stats = f"Rollout finished after {len(rollouts[0].observations)} steps, result was {str_result}"
-            if result != 0:
-                post_stats += f", goal speed: {goal_speed:.2f} kph"
-            print(post_stats)
+                state = rollouts[0].infos[-2]["state"]
+                goal_speed = np.linalg.norm(state.ball.linear_velocity) * 0.036  # kph
+                str_result = ('+' if result > 0 else "") + str(result)
+                post_stats = f"Rollout finished after {len(rollouts[0].observations)} steps, result was {str_result}"
+                if result != 0:
+                    post_stats += f", goal speed: {goal_speed:.2f} kph"
+                print(post_stats)
 
             if not self.display_only:
                 rollout_data = encode_buffers(rollouts, strict=self.send_gamestates)  # TODO change
@@ -459,7 +465,6 @@ class RedisRolloutWorker:
                 #                               lambda: self.match._obs_builder,
                 #                               lambda: self.match._reward_fn,
                 #                               lambda: self.match._action_parser)
-                versions = [version for agent, version in agents]
                 rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result,
                                             self.send_gamestates))
                 t.join()
