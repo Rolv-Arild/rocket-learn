@@ -258,48 +258,50 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                         CloudpickleWrapper(self.act_parse_factory)
                     ))
 
+    def _plot_ratings(self, ratings):
+        mus = np.array([r.mu for r in ratings])
+        mus = mus - mus[0]
+        sigmas = np.array([r.sigma for r in ratings])
+        # sigmas[1:] = (sigmas[1:] ** 2 + sigmas[0] ** 2) ** 0.5
+
+        x = np.arange(len(mus))
+        y = mus
+        y_upper = mus + 2 * sigmas  # 95% confidence
+        y_lower = mus - 2 * sigmas
+
+        fig = go.Figure([
+            go.Scatter(
+                x=x,
+                y=y,
+                line=dict(color='rgb(0,100,80)'),
+                mode='lines',
+                name="mu",
+                showlegend=False
+            ),
+            go.Scatter(
+                x=np.concatenate((x, x[::-1])),  # x, then x reversed
+                y=np.concatenate((y_upper, y_lower[::-1])),  # upper, then lower reversed
+                fill='toself',
+                fillcolor='rgba(0,100,80,0.2)',  # TODO same color as wandb run?
+                line=dict(color='rgba(255,255,255,0)'),
+                hoverinfo="skip",
+                name="sigma",
+                showlegend=False
+            ),
+        ])
+
+        fig.update_layout(title="Rating", xaxis_title="Iteration", yaxis_title="TrueSkill")
+
+        self.logger.log({
+            "qualities": fig,
+        }, commit=False)
+
     def _add_opponent(self, agent):
         # Add to list
         self.redis.rpush(OPPONENT_MODELS, agent)
         # Set quality
         ratings = [Rating(*_unserialize(v)) for v in self.redis.lrange(QUALITIES, 0, -1)]
         if ratings:
-            mus = np.array([r.mu for r in ratings])
-            mus = mus - mus[0]
-            sigmas = np.array([r.sigma for r in ratings])
-            # sigmas[1:] = (sigmas[1:] ** 2 + sigmas[0] ** 2) ** 0.5
-
-            x = np.arange(len(mus))
-            y = mus
-            y_upper = mus + 2 * sigmas  # 95% confidence
-            y_lower = mus - 2 * sigmas
-
-            fig = go.Figure([
-                go.Scatter(
-                    x=x,
-                    y=y,
-                    line=dict(color='rgb(0,100,80)'),
-                    mode='lines',
-                    name="mu",
-                    showlegend=False
-                ),
-                go.Scatter(
-                    x=np.concatenate((x, x[::-1])),  # x, then x reversed
-                    y=np.concatenate((y_upper, y_lower[::-1])),  # upper, then lower reversed
-                    fill='toself',
-                    fillcolor='rgba(0,100,80,0.2)',  # TODO same color as wandb run?
-                    line=dict(color='rgba(255,255,255,0)'),
-                    hoverinfo="skip",
-                    name="sigma",
-                    showlegend=False
-                ),
-            ])
-
-            fig.update_layout(title="Rating", xaxis_title="Iteration", yaxis_title="TrueSkill")
-
-            self.logger.log({
-                "qualities": fig,
-            }, commit=False)
             quality = Rating(ratings[-1].mu, min(2 * ratings[-1].sigma, SIGMA))
         else:
             quality = Rating(0, 1)  # First (typically random) agent is initialized at 0
@@ -323,6 +325,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             "contributors": wandb.Table(columns=["name", "steps"], data=self.contributors.most_common())},
             commit=False
         )
+        self._plot_ratings([Rating(*_unserialize(v)) for v in self.redis.lrange(QUALITIES, 0, -1)])
         tot_contributors = self.redis.hgetall(CONTRIBUTORS)
         tot_contributors = Counter({name: int(count) for name, count in tot_contributors.items()})
         tot_contributors += self.contributors
