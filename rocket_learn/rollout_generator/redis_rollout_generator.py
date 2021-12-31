@@ -396,17 +396,16 @@ class RedisRolloutWorker:
             versions = np.random.choice(len(ratings), size=(len(ratings), n_old))
 
         qualities = np.zeros(len(ratings))
-
+        matchups = np.full((len(ratings), len(setup)), -1)
         for i, vs in enumerate(versions):
-            matchup = np.full(len(setup), -1)
-            matchup[setup] = vs
-            it_ratings = [ratings[v] for v in matchup]
+            matchups[i][setup] = vs
+            it_ratings = [ratings[v] for v in matchups[i]]
             mid = len(it_ratings) // 2
             p = probability_NvsM(it_ratings[:mid], it_ratings[mid:])
             qualities[i] = p * (1 - p)  # From AlphaStar
 
-        k = np.random.choice(len(qualities), p=qualities / qualities.sum())
-        return versions[k]
+        k = np.random.choice(len(matchups), p=qualities / qualities.sum())
+        return matchups[k]
 
     @functools.lru_cache(maxsize=8)
     def _get_past_model(self, version):
