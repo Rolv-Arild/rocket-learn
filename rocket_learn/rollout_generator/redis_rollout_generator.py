@@ -386,7 +386,7 @@ class RedisRolloutWorker:
             matchup[setup] = versions
             it_ratings = [ratings[v] for v in matchup]
             mid = len(it_ratings) // 2
-            quality = abs(0.5 - probability_NvsM(it_ratings[:mid], it_ratings[mid:]))
+            quality = -abs(0.5 - probability_NvsM(it_ratings[:mid], it_ratings[mid:]))
             if quality > best_quality:
                 best_matchup = [int(v) for v in matchup]
                 best_quality = quality
