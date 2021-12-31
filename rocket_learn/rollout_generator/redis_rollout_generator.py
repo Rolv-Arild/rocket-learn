@@ -405,7 +405,7 @@ class RedisRolloutWorker:
             qualities[i] = p * (1 - p)  # From AlphaStar
 
         k = np.random.choice(len(matchups), p=qualities / qualities.sum())
-        return matchups[k]
+        return matchups[k].tolist()
 
     @functools.lru_cache(maxsize=8)
     def _get_past_model(self, version):
