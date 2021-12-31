@@ -35,7 +35,7 @@ from rlgym.utils.gamestates import GameState
 from rocket_learn.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
 from rocket_learn.utils import util
-from rocket_learn.utils.util import encode_gamestate, probability_NvsM
+from rocket_learn.utils.util import encode_gamestate, probability_NvsM, softmax
 
 # Constants for consistent key lookup
 QUALITIES = "qualities"
@@ -350,14 +350,17 @@ class RedisRolloutWorker:
     Provides RedisRolloutGenerator with rollouts via a Redis server
     """
 
-    def __init__(self, redis: Redis, name: str, match: Match, current_version_prob=.9, display_only=False,
-                 send_gamestates=True):
+    def __init__(self, redis: Redis, name: str, match: Match,
+                 current_version_prob=.8, evaluation_prob=0.1, sigma_target=1,
+                 display_only=False, send_gamestates=True):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
 
         self.current_agent = _unserialize_model(self.redis.get(MODEL_LATEST))
         self.current_version_prob = current_version_prob
+        self.evaluation_prob = evaluation_prob
+        self.sigma_target = sigma_target
         self.send_gamestates = send_gamestates
 
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
@@ -376,21 +379,34 @@ class RedisRolloutWorker:
         random.shuffle(setup)
         # Get qualities
         ratings = [Rating(*_unserialize(v)) for v in self.redis.lrange(QUALITIES, 0, -1)]
-        sigmas = np.array([r.sigma for r in ratings])
-        probs = sigmas / sigmas.sum()  # Have higher chance of selecting high sigma
-        best_matchup = None
-        best_quality = -1
-        for it in range(round(len(ratings) ** 0.5)):
+
+        if n_new == 0:  # Evaluation game, try to find agents with high sigma
+            sigmas = np.array([r.sigma for r in ratings])
+            probs = np.clip(sigmas - self.sigma_target, a_min=0, a_max=None)
+            s = probs.sum()
+            if s == 0:
+                n_new = np.random.randint(1, n_old)
+                return self._get_opponent_indices(n_new, n_old - n_new)
+            probs /= s
+            override_versions = np.random.choice(len(ratings), size=len(ratings), p=probs)
+            override_index = np.random.choice(n_old, size=len(ratings))
+            versions = np.random.choice(len(ratings), size=(len(ratings), n_old))
+            versions[np.arange(len(versions)), override_index] = override_versions
+        else:
+            versions = np.random.choice(len(ratings), size=(len(ratings), n_old))
+
+        qualities = np.zeros(len(ratings))
+
+        for i, vs in enumerate(versions):
             matchup = np.full(len(setup), -1)
-            versions = np.random.choice(len(ratings), size=n_old, p=probs)
-            matchup[setup] = versions
+            matchup[setup] = vs
             it_ratings = [ratings[v] for v in matchup]
             mid = len(it_ratings) // 2
-            quality = -abs(0.5 - probability_NvsM(it_ratings[:mid], it_ratings[mid:]))
-            if quality > best_quality:
-                best_matchup = [int(v) for v in matchup]
-                best_quality = quality
-        return best_matchup
+            p = probability_NvsM(it_ratings[:mid], it_ratings[mid:])
+            qualities[i] = p * (1 - p)  # From AlphaStar
+
+        k = np.random.choice(len(qualities), p=qualities / qualities.sum())
+        return versions[k]
 
     @functools.lru_cache(maxsize=8)
     def _get_past_model(self, version):
@@ -429,7 +445,10 @@ class RedisRolloutWorker:
             if self.n_agents > 1:
                 r = np.random.random()
                 if r > self.current_version_prob:
-                    n_old = np.random.randint(low=0, high=self.n_agents + 1)
+                    if (1 - r) / (1 - self.current_version_prob) < self.evaluation_prob:
+                        n_old = self.n_agents
+                    else:
+                        n_old = np.random.randint(low=1, high=self.n_agents)
 
             n_new = self.n_agents - n_old
             versions = self._get_opponent_indices(n_new, n_old)
