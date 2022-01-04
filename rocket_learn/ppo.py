@@ -79,6 +79,7 @@ class PPO:
         self.total_steps = 0
         self.logger = logger
         self.logger.watch((self.agent.actor, self.agent.critic))
+        self.timer = time.time_ns() // 1_000_000
 
     def update_reward_norm(self, rewards: np.ndarray) -> np.ndarray:
         batch_mean = np.mean(rewards)
@@ -261,6 +262,10 @@ class PPO:
         tot_policy_loss = 0
         tot_entropy_loss = 0
         tot_value_loss = 0
+        total_kl_div = 0
+        clipped_count = 0
+        
+        aprox_kl_divergs = []
         n = 0
 
         print("Training network...")
@@ -321,7 +326,16 @@ class PPO:
 
                 loss.backward()
 
-                # *** self.logger write here to log results ***
+                # *** self.logger write here to log results ***         
+
+                # measure in milliseconds
+                epoch_time = (time.time_ns() // 1_000_000) - self.timer
+                self.timer = time.time_ns() // 1_000_000
+                
+                clipped_ratio = th.clamp(ratio, 1 - self.clip_range, 1 + self.clip_range)
+                if not th.equal(clipped_ratio, ratio):
+                    clipped_count += 1
+                total_kl_div += th.mean((th.exp(ratio.detach().cpu()) - 1) - ratio.detach().cpu())           
                 tot_loss += loss.item()
                 tot_policy_loss += policy_loss.item()
                 tot_entropy_loss += entropy_loss.item()
@@ -332,16 +346,26 @@ class PPO:
             # Clip grad norm
             if self.max_grad_norm is not None:
                 clip_grad_norm_(self.agent.actor.parameters(), self.max_grad_norm)
+                
+            precompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
 
             self.agent.optimizer.step()
             self.agent.optimizer.zero_grad()
+            
+            postcompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
 
         self.logger.log({
             "loss": tot_loss / n,
             "policy_loss": tot_policy_loss / n,
             "entropy_loss": tot_entropy_loss / n,
-            "value_loss": tot_value_loss / n,
+            "value_loss": tot_value_loss / n,            
+            "mean_kl": total_kl_div / n,            
+            "clip_fraction": clipped_count / n,     
+            "epoch_time": epoch_time,             
+            "update_magnitude": th.dist(precompute, postcompute, p=2), 
+            
         }, step=iteration, commit=False)  # Is committed after when calculating fps
+        
 
     def load(self, load_location, continue_iterations=True):
         """
