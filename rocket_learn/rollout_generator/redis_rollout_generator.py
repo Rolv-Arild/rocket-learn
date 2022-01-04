@@ -315,11 +315,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         model_bytes = _serialize_model(new_params)
         self.redis.set(MODEL_LATEST, model_bytes)
         self.redis.decr(VERSION_LATEST)
-        # Same mu, reset sigma
 
-        # TODO Idea: workers send name to identify who contributed rollouts,
-        # keep track of top rollout contributors (each param update and total)
-        # Also UID to keep track of current number of contributing workers?
         print("Top contributors:\n" + "\n".join(f"{c}: {n}" for c, n in self.contributors.most_common(5)))
         self.logger.log({
             "contributors": wandb.Table(columns=["name", "steps"], data=self.contributors.most_common())},
@@ -354,7 +350,7 @@ class RedisRolloutWorker:
     """
 
     def __init__(self, redis: Redis, name: str, match: Match,
-                 current_version_prob=.8, evaluation_prob=0.1, sigma_target=1,
+                 current_version_prob=.8, evaluation_prob=0.01, sigma_target=1,
                  display_only=False, send_gamestates=True):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
@@ -446,11 +442,10 @@ class RedisRolloutWorker:
             n_old = 0
             if self.n_agents > 1:
                 r = np.random.random()
-                if r > self.current_version_prob:
-                    if (1 - r) / (1 - self.current_version_prob) < self.evaluation_prob:
-                        n_old = self.n_agents
-                    else:
-                        n_old = np.random.randint(low=1, high=self.n_agents)
+                if r < self.evaluation_prob:
+                    n_old = self.n_agents
+                elif (r - self.evaluation_prob) / (1 - self.evaluation_prob) > self.current_version_prob:
+                    n_old = np.random.randint(low=1, high=self.n_agents)
 
             n_new = self.n_agents - n_old
             versions = self._get_opponent_indices(n_new, n_old)
