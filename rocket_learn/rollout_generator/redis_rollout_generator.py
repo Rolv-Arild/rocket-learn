@@ -371,6 +371,9 @@ class RedisRolloutWorker:
         if not self.display_only:
             print("Started worker", self.uuid, "on host", self.redis.connection_pool.connection_kwargs.get("host"),
                   "under name", name)  # TODO log instead
+        else:
+            print("Streaming mode set. Running silent.")
+                  
         self.match = match
         self.env = Gym(match=self.match, pipe_id=os.getpid(), launch_preference=LaunchPreference.EPIC_LOGIN_TRICK,
                        use_injector=True)
