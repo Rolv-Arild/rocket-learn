@@ -356,6 +356,8 @@ class RedisRolloutWorker:
         self.redis = redis
         self.name = name
 
+        self.display_only = display_only
+
         self.current_agent = _unserialize_model(self.redis.get(MODEL_LATEST))
         self.current_version_prob = current_version_prob
         self.evaluation_prob = evaluation_prob
@@ -365,13 +367,15 @@ class RedisRolloutWorker:
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.uuid = str(uuid4())
         self.redis.rpush(WORKER_IDS, self.uuid)
-        print("Started worker", self.uuid, "on host", self.redis.connection_pool.connection_kwargs.get("host"),
-              "under name", name)  # TODO log instead
+        
+        if not self.display_only:
+            print("Started worker", self.uuid, "on host", self.redis.connection_pool.connection_kwargs.get("host"),
+                  "under name", name)  # TODO log instead
         self.match = match
         self.env = Gym(match=self.match, pipe_id=os.getpid(), launch_preference=LaunchPreference.EPIC_LOGIN_TRICK,
                        use_injector=True)
         self.n_agents = self.match.agents
-        self.display_only = display_only
+        
 
     def _get_opponent_indices(self, n_new, n_old):
         setup = [False] * n_new + [True] * n_old
@@ -459,14 +463,15 @@ class RedisRolloutWorker:
             versions = [v if v != -1 else latest_version for v in versions]
 
             encode = self.send_gamestates
-            if all(v >= 0 for v in versions):
+            if all(v >= 0 for v in versions) and not self.display_only:
                 print("Running evaluation game with versions:", versions)
                 result = util.generate_episode(self.env, agents, evaluate=True)
                 rollouts = []
                 print("Evaluation finished, goal differential:", result)
                 encode = False
             else:
-                print("Generating rollout with versions:", versions)
+                if not self.display_only:
+                    print("Generating rollout with versions:", versions)
 
                 rollouts, result = util.generate_episode(self.env, agents, evaluate=False)
                 if len(rollouts[0].observations) <= 1:
@@ -478,7 +483,9 @@ class RedisRolloutWorker:
                 post_stats = f"Rollout finished after {len(rollouts[0].observations)} steps, result was {str_result}"
                 if result != 0:
                     post_stats += f", goal speed: {goal_speed:.2f} kph"
-                print(post_stats)
+                    
+                if not self.display_only:        
+                    print(post_stats)
 
             if not self.display_only:
                 rollout_data = encode_buffers(rollouts, strict=encode)  # TODO change
