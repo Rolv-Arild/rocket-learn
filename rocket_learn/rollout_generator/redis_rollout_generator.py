@@ -374,8 +374,8 @@ class RedisRolloutWorker:
         self.display_only = display_only
 
     def _get_opponent_indices(self, n_new, n_old):
-        setup = [False] * n_new + [True] * n_old
-        random.shuffle(setup)
+        if n_old == 0:
+            return [-1] * n_new
         # Get qualities
         ratings = [Rating(*_unserialize(v)) for v in self.redis.lrange(QUALITIES, 0, -1)]
 
@@ -387,24 +387,38 @@ class RedisRolloutWorker:
                 n_new = np.random.randint(1, n_old)
                 return self._get_opponent_indices(n_new, n_old - n_new)
             probs /= s
-            override_versions = np.random.choice(len(ratings), size=len(ratings), p=probs)
-            override_index = np.random.choice(n_old, size=len(ratings))
-            versions = np.random.choice(len(ratings), size=(len(ratings), n_old))
-            versions[np.arange(len(versions)), override_index] = override_versions
+            versions = [np.random.choice(len(ratings), p=probs)]
+            target_rating = ratings[versions[0]]
+            n_old -= 1
         else:
-            versions = np.random.choice(len(ratings), size=(len(ratings), n_old))
+            versions = [-1] * n_new
+            target_rating = ratings[-1]
 
-        qualities = np.zeros(len(ratings))
-        matchups = np.full((len(ratings), len(setup)), -1)
-        for i, vs in enumerate(versions):
-            matchups[i][setup] = vs
-            it_ratings = [ratings[v] for v in matchups[i]]
+        # Calculate 1v1 win prob against target
+        # All the agents included should hold their own (at least approximately)
+        # This is to prevent unrealistic scenarios,
+        # like for instance ratings of [100, 0] vs [100, 0], which is technically fair but not useful
+        probs = np.zeros(len(ratings))
+        for i, rating in enumerate(ratings):
+            p = probability_NvsM([rating], [target_rating])
+            probs[i] = (p * (1 - p)) ** (2 / (n_old + n_new))  # Be a little bit less strict the more players there are
+        probs /= probs.sum()
+
+        old_versions = np.random.choice(len(probs), size=n_old, p=probs).tolist()
+        versions += old_versions
+
+        # Then calculate the full matchup, with just permutations of the selected versions (weighted by fairness)
+        matchups = []
+        qualities = []
+        for perm in itertools.permutations(versions):
+            it_ratings = [ratings[v] for v in perm]
             mid = len(it_ratings) // 2
             p = probability_NvsM(it_ratings[:mid], it_ratings[mid:])
-            qualities[i] = p * (1 - p)  # From AlphaStar
-
+            matchups.append(perm)
+            qualities.append(p * (1 - p))  # From AlphaStar
+        qualities = np.array(qualities)
         k = np.random.choice(len(matchups), p=qualities / qualities.sum())
-        return matchups[k].tolist()
+        return matchups[k]
 
     @functools.lru_cache(maxsize=8)
     def _get_past_model(self, version):
