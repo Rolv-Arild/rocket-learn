@@ -271,7 +271,7 @@ class PPO:
         print("Training network...")
 
         precompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
-        t0 = time.perf_counter()
+        t0 = time.perf_counter_ns()
         self.agent.optimizer.zero_grad()
         for e in range(self.epochs):
             # this is mostly pulled from sb3
@@ -344,7 +344,7 @@ class PPO:
             self.agent.optimizer.step()
             self.agent.optimizer.zero_grad()
 
-        t1 = time.perf_counter()
+        t1 = time.perf_counter_ns()
         postcompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
 
         self.logger.log({
@@ -354,7 +354,7 @@ class PPO:
             "value_loss": tot_value_loss / n,
             "mean_kl": total_kl_div / n,
             "clip_fraction": tot_clipped / n,
-            "epoch_time": (t1 - t0) / self.epochs,
+            "epoch_time": (t1 - t0) / (1e6 * self.epochs),
             "update_magnitude": th.dist(precompute, postcompute, p=2),
 
         }, step=iteration, commit=False)  # Is committed after when calculating fps
