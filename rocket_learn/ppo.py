@@ -263,7 +263,7 @@ class PPO:
         tot_entropy_loss = 0
         tot_value_loss = 0
         total_kl_div = 0
-        clipped_count = 0
+        tot_clipped = 0
         
         aprox_kl_divergs = []
         n = 0
@@ -332,14 +332,12 @@ class PPO:
                 epoch_time = (time.time_ns() // 1_000_000) - self.timer
                 self.timer = time.time_ns() // 1_000_000
                 
-                clipped_ratio = th.clamp(ratio, 1 - self.clip_range, 1 + self.clip_range)
-                if not th.equal(clipped_ratio, ratio):
-                    clipped_count += 1
                 total_kl_div += th.mean((th.exp(ratio.detach().cpu()) - 1) - ratio.detach().cpu())           
                 tot_loss += loss.item()
                 tot_policy_loss += policy_loss.item()
                 tot_entropy_loss += entropy_loss.item()
                 tot_value_loss += value_loss.item()
+                tot_clipped += th.mean((th.abs(ratio - 1) > self.clip_range).float()).item()
                 n += 1
                 # pb.update(self.minibatch_size)
 
@@ -360,7 +358,7 @@ class PPO:
             "entropy_loss": tot_entropy_loss / n,
             "value_loss": tot_value_loss / n,            
             "mean_kl": total_kl_div / n,            
-            "clip_fraction": clipped_count / n,     
+            "clip_fraction": tot_clipped / n,     
             "epoch_time": epoch_time,             
             "update_magnitude": th.dist(precompute, postcompute, p=2), 
             
