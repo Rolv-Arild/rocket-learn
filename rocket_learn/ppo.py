@@ -93,7 +93,7 @@ class PPO:
         m_a = self.running_rew_var * self.running_rew_count
         m_b = batch_var * batch_count
         m_2 = m_a + m_b + np.square(delta) * self.running_rew_count * batch_count / (
-                    self.running_rew_count + batch_count)
+                self.running_rew_count + batch_count)
         new_var = m_2 / (self.running_rew_count + batch_count)
 
         new_count = batch_count + self.running_rew_count
@@ -119,7 +119,7 @@ class PPO:
 
         iteration = self.starting_iteration
         rollout_gen = self.rollout_generator.generate_rollouts()
-        
+
         self.rollout_generator.update_parameters(self.agent.actor)
 
         while True:
@@ -141,10 +141,10 @@ class PPO:
 
             self.calculate(_iter(), iteration)
             iteration += 1
-            
+
             if save_dir and iteration % iterations_per_save == 0:
                 self.save(current_run_dir, iteration)  # noqa
-            
+
             self.rollout_generator.update_parameters(self.agent.actor)
 
             self.total_steps += self.n_steps  # size
@@ -264,12 +264,14 @@ class PPO:
         tot_value_loss = 0
         total_kl_div = 0
         tot_clipped = 0
-        
+
         aprox_kl_divergs = []
         n = 0
 
         print("Training network...")
 
+        precompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
+        t0 = time.perf_counter()
         self.agent.optimizer.zero_grad()
         for e in range(self.epochs):
             # this is mostly pulled from sb3
@@ -326,13 +328,7 @@ class PPO:
 
                 loss.backward()
 
-                # *** self.logger write here to log results ***         
-
-                # measure in milliseconds
-                epoch_time = (time.time_ns() // 1_000_000) - self.timer
-                self.timer = time.time_ns() // 1_000_000
-                
-                total_kl_div += th.mean((th.exp(ratio.detach().cpu()) - 1) - ratio.detach().cpu())           
+                total_kl_div += th.mean((th.exp(ratio.detach().cpu()) - 1) - ratio.detach().cpu())
                 tot_loss += loss.item()
                 tot_policy_loss += policy_loss.item()
                 tot_entropy_loss += entropy_loss.item()
@@ -344,26 +340,24 @@ class PPO:
             # Clip grad norm
             if self.max_grad_norm is not None:
                 clip_grad_norm_(self.agent.actor.parameters(), self.max_grad_norm)
-                
-            precompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
 
             self.agent.optimizer.step()
             self.agent.optimizer.zero_grad()
-            
-            postcompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
+
+        t1 = time.perf_counter()
+        postcompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
 
         self.logger.log({
             "loss": tot_loss / n,
             "policy_loss": tot_policy_loss / n,
             "entropy_loss": tot_entropy_loss / n,
-            "value_loss": tot_value_loss / n,            
-            "mean_kl": total_kl_div / n,            
-            "clip_fraction": tot_clipped / n,     
-            "epoch_time": epoch_time,             
-            "update_magnitude": th.dist(precompute, postcompute, p=2), 
-            
+            "value_loss": tot_value_loss / n,
+            "mean_kl": total_kl_div / n,
+            "clip_fraction": tot_clipped / n,
+            "epoch_time": (t1 - t0) / self.epochs,
+            "update_magnitude": th.dist(precompute, postcompute, p=2),
+
         }, step=iteration, commit=False)  # Is committed after when calculating fps
-        
 
     def load(self, load_location, continue_iterations=True):
         """
@@ -377,7 +371,7 @@ class PPO:
         self.agent.critic.load_state_dict(checkpoint['critic_state_dict'])
         # self.agent.shared.load_state_dict(checkpoint['shared_state_dict'])
         self.agent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        
+
         if continue_iterations:
             self.starting_iteration = checkpoint['epoch']
             self.total_steps = checkpoint["total_steps"]
