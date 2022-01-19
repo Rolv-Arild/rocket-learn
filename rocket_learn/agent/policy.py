@@ -8,6 +8,9 @@ class Policy(nn.Module, ABC):
     def forward(self, *args, **kwargs): raise NotImplementedError
 
     @abstractmethod
+    def jit_compile_net(self, obs): raise NotImplementedError
+
+    @abstractmethod
     def get_action_distribution(self, obs): raise NotImplementedError
 
     @staticmethod

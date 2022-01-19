@@ -15,8 +15,10 @@ from rocket_learn.agent.policy import Policy
 from rocket_learn.experience_buffer import ExperienceBuffer
 from rlgym.utils.terminal_conditions.common_conditions import GoalScoredCondition
 
+import warnings
 
-def generate_episode(env: Gym, policies: List[Policy], evaluate=False) -> (List[ExperienceBuffer], int):
+
+def generate_episode(env: Gym, policies: List[Policy], evaluate=False, jit_compile=False) -> (List[ExperienceBuffer], int):
     """
     create experience buffer data by interacting with the environment(s)
     """
@@ -39,6 +41,13 @@ def generate_episode(env: Gym, policies: List[Policy], evaluate=False) -> (List[
         for _ in range(len(policies))
     ]
     ep_rews = [0 for _ in range(len(policies))]
+
+    #to speed up execution, jit compile all policies's nets for faster execution
+    if jit_compile:
+        #if multiple policies have the same net, subsequent compiliations throw a no-op User Warnings
+        warnings.filterwarnings("ignore", category=UserWarning)
+        for p in policies:
+            p.jit_compile_net(observations[0])
 
     with torch.no_grad():
         while True:

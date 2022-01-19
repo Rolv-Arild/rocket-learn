@@ -259,6 +259,9 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                     ))
 
     def _plot_ratings(self, ratings):
+        if len(ratings) == 0:
+            return
+
         mus = np.array([r.mu for r in ratings])
         mus = mus - mus[0]
         sigmas = np.array([r.sigma for r in ratings])
@@ -482,7 +485,7 @@ class RedisRolloutWorker:
             encode = self.send_gamestates
             if all(v >= 0 for v in versions) and not self.display_only:
                 print("Running evaluation game with versions:", versions)
-                result = util.generate_episode(self.env, agents, evaluate=True)
+                result = util.generate_episode(self.env, agents, evaluate=True, jit_compile=True)
                 rollouts = []
                 print("Evaluation finished, goal differential:", result)
                 encode = False
@@ -490,9 +493,9 @@ class RedisRolloutWorker:
                 if not self.display_only:
                     print("Generating rollout with versions:", versions)
 
-                rollouts, result = util.generate_episode(self.env, agents, evaluate=False)
+                rollouts, result = util.generate_episode(self.env, agents, evaluate=False, jit_compile=not self.display_only)
                 if len(rollouts[0].observations) <= 1:
-                    rollouts, result = util.generate_episode(self.env, agents, evaluate=False)
+                    rollouts, result = util.generate_episode(self.env, agents, evaluate=False, jit_compile=not self.display_only)
 
                 state = rollouts[0].infos[-2]["state"]
                 goal_speed = np.linalg.norm(state.ball.linear_velocity) * 0.036  # kph
