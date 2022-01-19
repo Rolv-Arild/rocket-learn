@@ -19,21 +19,6 @@ class DiscretePolicy(Policy):
         logits = self.net(obs)
         return logits
 
-    def jit_compile_net(self, obs):
-        """
-            Turns the net into a TorchScript Module
-
-            * DO NOT USE IF YOU LATER PLAN TO TRANSMIT MODEL PARAMS*
-
-            TODO: add parameter() method to ensure you can't pull params
-
-            param obs: example input to trace from
-        """
-        input = th.from_numpy(obs.astype(np.float32))
-        traced = th.jit.trace(self.net, input)
-        self.net = traced
-
-
     def get_action_distribution(self, obs):
         if isinstance(obs, np.ndarray):
             obs = th.from_numpy(obs).float()
