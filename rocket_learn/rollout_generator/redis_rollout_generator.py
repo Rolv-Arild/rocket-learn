@@ -354,7 +354,7 @@ class RedisRolloutWorker:
 
     def __init__(self, redis: Redis, name: str, match: Match,
                  current_version_prob=.8, evaluation_prob=0.01, sigma_target=1,
-                 display_only=False, send_gamestates=True):
+                 display_only=False, send_gamestates=True, jit_compile=False):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -366,6 +366,7 @@ class RedisRolloutWorker:
         self.evaluation_prob = evaluation_prob
         self.sigma_target = sigma_target
         self.send_gamestates = send_gamestates
+        self.jit_compile = jit_compile
 
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.uuid = str(uuid4())
@@ -485,7 +486,7 @@ class RedisRolloutWorker:
             encode = self.send_gamestates
             if all(v >= 0 for v in versions) and not self.display_only:
                 print("Running evaluation game with versions:", versions)
-                result = util.generate_episode(self.env, agents, evaluate=True, jit_compile=True)
+                result = util.generate_episode(self.env, agents, evaluate=True, jit_compile=self.jit_compile)
                 rollouts = []
                 print("Evaluation finished, goal differential:", result)
                 encode = False
@@ -493,9 +494,9 @@ class RedisRolloutWorker:
                 if not self.display_only:
                     print("Generating rollout with versions:", versions)
 
-                rollouts, result = util.generate_episode(self.env, agents, evaluate=False, jit_compile=not self.display_only)
+                rollouts, result = util.generate_episode(self.env, agents, evaluate=False, jit_compile=self.jit_compile)
                 if len(rollouts[0].observations) <= 1:
-                    rollouts, result = util.generate_episode(self.env, agents, evaluate=False, jit_compile=not self.display_only)
+                    rollouts, result = util.generate_episode(self.env, agents, evaluate=False, jit_compile=self.jit_compile)
 
                 state = rollouts[0].infos[-2]["state"]
                 goal_speed = np.linalg.norm(state.ball.linear_velocity) * 0.036  # kph

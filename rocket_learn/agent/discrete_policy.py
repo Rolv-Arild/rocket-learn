@@ -33,6 +33,7 @@ class DiscretePolicy(Policy):
         traced = th.jit.trace(self.net, input)
         self.net = traced
 
+
     def get_action_distribution(self, obs):
         if isinstance(obs, np.ndarray):
             obs = th.from_numpy(obs).float()

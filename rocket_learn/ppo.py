@@ -56,6 +56,7 @@ class PPO:
         self.device = device
 
         self.starting_iteration = 0
+        self.tracer_obs = None
 
         # hyperparameters
         self.epochs = epochs
@@ -104,7 +105,7 @@ class PPO:
 
         return (rewards - self.running_rew_mean) / np.sqrt(self.running_rew_var + 1e-8)  # TODO normalize before update?
 
-    def run(self, iterations_per_save=10, save_dir=None):
+    def run(self, iterations_per_save=10, save_dir=None, save_jit=False):
         """
         Generate rollout data and train
         :param iterations_per_save: number of iterations between checkpoint saves
@@ -143,7 +144,7 @@ class PPO:
             iteration += 1
 
             if save_dir and iteration % iterations_per_save == 0:
-                self.save(current_run_dir, iteration)  # noqa
+                self.save(current_run_dir, iteration, save_jit)  # noqa
 
             self.rollout_generator.update_parameters(self.agent.actor)
 
@@ -191,7 +192,7 @@ class PPO:
                 obs_tensor = tuple(torch.as_tensor(np.vstack(t)).float() for t in transposed)
             else:
                 obs_tensor = th.as_tensor(np.stack(buffer.observations)).float()
-            # obs_tensor = th.as_tensor(np.stack(buffer.observations)).float()
+
             act_tensor = th.as_tensor(np.stack(buffer.actions))
             log_prob_tensor = th.as_tensor(np.stack(buffer.log_probs))
             rew_tensor = th.as_tensor(np.stack(buffer.rewards))
@@ -210,6 +211,10 @@ class PPO:
                 else:
                     x = obs_tensor.to(self.device)
                 values = self.agent.critic(x).detach().cpu().numpy().flatten()  # No batching?
+
+                #need to store an observation for later jit tracing/saving
+                if self.tracer_obs is None:
+                    self.tracer_obs = x[0]
 
                 last_values = values[-1]
                 last_gae_lam = 0
@@ -377,7 +382,7 @@ class PPO:
             self.total_steps = checkpoint["total_steps"]
             print("Continuing training at iteration " + str(self.starting_iteration))
 
-    def save(self, save_location, current_step):
+    def save(self, save_location, current_step, save_actor_jit=False):
         """
         Save the model weights, optimizer values, and metadata
         :param save_location: where to save
@@ -398,3 +403,8 @@ class PPO:
             'optimizer_state_dict': self.agent.optimizer.state_dict(),
             # TODO save/load reward normalization mean, std, count
         }, version_dir + "\\checkpoint.pt")
+
+        print(self.tracer_obs)
+        if save_actor_jit and self.tracer_obs.any() is not None:
+            traced_model = torch.jit.trace(self.agent.actor.net, self.tracer_obs)
+            torch.jit.save(traced_model, version_dir + "\\jit_model.pt")
