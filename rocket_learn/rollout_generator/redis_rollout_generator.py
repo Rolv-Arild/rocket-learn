@@ -367,6 +367,8 @@ class RedisRolloutWorker:
         self.sigma_target = sigma_target
         self.send_gamestates = send_gamestates
         self.jit_compile = jit_compile
+        self.jit_models = {}
+        self.jit_trace_obs = None
 
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.uuid = str(uuid4())
@@ -457,6 +459,7 @@ class RedisRolloutWorker:
                 if model_bytes is None:
                     time.sleep(1)
                     continue  # This is maybe not necessary? Can't hurt to leave it in.
+
                 latest_version = available_version
                 updated_agent = _unserialize_model(model_bytes)
                 self.current_agent = updated_agent
@@ -477,16 +480,37 @@ class RedisRolloutWorker:
             agents = []
             for version in versions:
                 if version == -1:
+                    if self.jit_compile and self.jit_trace_obs is not None:
+                        # minus is used to indicate latest, abs is raw version number
+                        version_clean = abs(latest_version)
+                        if version_clean not in self.jit_models:
+                            self.current_agent.jit_compile_net(self.jit_trace_obs)
+                            self.jit_models[version_clean] = self.current_agent
+                        else:
+                            self.current_agent = self.jit_models[version_clean]
+
                     agents.append(self.current_agent)
+
                 else:
                     selected_agent = self._get_past_model(version)
+
+                    if self.jit_compile and self.jit_trace_obs is not None:
+                        if version not in self.jit_models:
+                            selected_agent.jit_compile_net(self.jit_trace_obs)
+
+                            self.jit_models[version] = selected_agent
+                        else:
+                            selected_agent = self.jit_models[version]
+
                     agents.append(selected_agent)
+
+
             versions = [v if v != -1 else latest_version for v in versions]
 
             encode = self.send_gamestates
             if all(v >= 0 for v in versions) and not self.display_only:
                 print("Running evaluation game with versions:", versions)
-                result = util.generate_episode(self.env, agents, evaluate=True, jit_compile=self.jit_compile)
+                result = util.generate_episode(self.env, agents, evaluate=True)
                 rollouts = []
                 print("Evaluation finished, goal differential:", result)
                 encode = False
@@ -494,9 +518,13 @@ class RedisRolloutWorker:
                 if not self.display_only:
                     print("Generating rollout with versions:", versions)
 
-                rollouts, result = util.generate_episode(self.env, agents, evaluate=False, jit_compile=self.jit_compile)
+                rollouts, result = util.generate_episode(self.env, agents, evaluate=False)
                 if len(rollouts[0].observations) <= 1:
-                    rollouts, result = util.generate_episode(self.env, agents, evaluate=False, jit_compile=self.jit_compile)
+                    rollouts, result = util.generate_episode(self.env, agents, evaluate=False)
+
+                #print(rollouts[0].observations.shape)
+                if self.jit_trace_obs is None:
+                    self.jit_trace_obs = rollouts[0].observations[0]
 
                 state = rollouts[0].infos[-2]["state"]
                 goal_speed = np.linalg.norm(state.ball.linear_velocity) * 0.036  # kph
