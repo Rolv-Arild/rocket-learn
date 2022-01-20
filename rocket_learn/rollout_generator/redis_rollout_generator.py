@@ -463,6 +463,9 @@ class RedisRolloutWorker:
                 latest_version = available_version
                 updated_agent = _unserialize_model(model_bytes)
                 self.current_agent = updated_agent
+                
+                if self.jit_compile and self.jit_trace_obs is not None:
+                    self.current_agent.jit_compile_net(self.jit_trace_obs)
 
             n += 1
 
@@ -477,31 +480,14 @@ class RedisRolloutWorker:
 
             n_new = self.n_agents - n_old
             versions = self._get_opponent_indices(n_new, n_old)
+
             agents = []
             for version in versions:
                 if version == -1:
-                    if self.jit_compile and self.jit_trace_obs is not None:
-                        # minus is used to indicate latest, abs is raw version number
-                        version_clean = abs(latest_version)
-                        if version_clean not in self.jit_models:
-                            self.current_agent.jit_compile_net(self.jit_trace_obs)
-                            self.jit_models[version_clean] = self.current_agent
-                        else:
-                            self.current_agent = self.jit_models[version_clean]
-
                     agents.append(self.current_agent)
 
                 else:
                     selected_agent = self._get_past_model(version)
-
-                    if self.jit_compile and self.jit_trace_obs is not None:
-                        if version not in self.jit_models:
-                            selected_agent.jit_compile_net(self.jit_trace_obs)
-
-                            self.jit_models[version] = selected_agent
-                        else:
-                            selected_agent = self.jit_models[version]
-
                     agents.append(selected_agent)
 
 
