@@ -270,7 +270,6 @@ class PPO:
         total_kl_div = 0
         tot_clipped = 0
 
-        aprox_kl_divergs = []
         n = 0
 
         print("Training network...")

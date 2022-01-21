@@ -13,7 +13,7 @@ class BatchedObsBuilder(ObsBuilder):
         self.current_state = None
         self.current_obs = None
 
-    def batched_build_obs(self, encoded_states: np.ndarray):
+    def batched_build_obs(self, encoded_states: np.ndarray) -> Any:
         raise NotImplementedError
 
     def add_actions(self, obs: Any, previous_actions: np.ndarray, player_index=None):

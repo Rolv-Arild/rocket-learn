@@ -35,7 +35,7 @@ class DiscretePolicy(Policy):
                 else F.pad(l, pad=(0, max_shape - l.shape[-1]), value=float("-inf"))
                 for l in logits
             ]
-        ).swapdims(0, 1).squeeze()
+        ).swapdims(0, 1).squeeze(dim=2)
 
         return Categorical(logits=logits)
 
@@ -61,5 +61,5 @@ class DiscretePolicy(Policy):
 
     def env_compatible(self, action):
         if isinstance(action, th.Tensor):
-            action = action.numpy()
+            action = action.numpy().squeeze()
         return action
