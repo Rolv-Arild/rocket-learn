@@ -52,7 +52,7 @@ class DiscretePolicy(Policy):
         return action_indices
 
     def log_prob(self, distribution: Categorical, selected_action):
-        log_prob = distribution.log_prob(selected_action).sum(dim=-1)
+        log_prob = distribution.log_prob(selected_action.squeeze(dim=-1)).sum(dim=-1)
         return log_prob
 
     def entropy(self, distribution: Categorical, selected_action):
