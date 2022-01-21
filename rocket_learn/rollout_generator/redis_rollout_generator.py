@@ -35,6 +35,7 @@ from rlgym.utils.gamestates import GameState
 from rocket_learn.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
 from rocket_learn.utils import util
+from rocket_learn.utils.batched_obs_builder import BatchedObsBuilder
 from rocket_learn.utils.util import encode_gamestate, probability_NvsM, softmax
 
 # Constants for consistent key lookup
@@ -102,10 +103,28 @@ def decode_buffers(enc_buffers, encoded, obs_build_factory=None, rew_func_factor
             game_states, actions, log_probs, rewards = enc_buffers
         else:
             raise ValueError
-        game_states = [GameState(gs.tolist()) for gs in game_states]
-        obs_builder = obs_build_factory()  # TODO add subclass for batch processing, use if available
-        rew_func = rew_func_factory()
+
+        obs_builder = obs_build_factory()
         act_parser = act_parse_factory()
+
+        if isinstance(obs_builder, BatchedObsBuilder):
+            assert rewards is not None
+            obs = obs_builder.batched_build_obs(game_states[:-1])
+            prev_actions = act_parser.parse_actions(actions.reshape((-1,) + actions.shape[2:]).copy(), None).reshape(
+                actions.shape[:2] + (8,))
+            prev_actions = np.concatenate((np.zeros((actions.shape[0], 1, 8)), prev_actions[:, :-1]), axis=1)
+            obs_builder.add_actions(obs, prev_actions)
+            dones = np.zeros_like(rewards, dtype=bool)
+            dones[-1, :] = True
+            buffers = [
+                ExperienceBuffer(observations=[obs[i]], actions=actions[i], rewards=rewards[i], dones=dones[i],
+                                 log_probs=log_probs[i])
+                for i in range(len(obs))
+            ]
+            return buffers
+
+        game_states = [GameState(gs.tolist()) for gs in game_states]
+        rew_func = rew_func_factory()
         obs_builder.reset(game_states[0])
         rew_func.reset(game_states[0])
         buffers = [
@@ -259,6 +278,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                     ))
 
     def _plot_ratings(self, ratings):
+        if len(ratings) <= 0:
+            return
         mus = np.array([r.mu for r in ratings])
         mus = mus - mus[0]
         sigmas = np.array([r.sigma for r in ratings])
@@ -367,18 +388,17 @@ class RedisRolloutWorker:
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.uuid = str(uuid4())
         self.redis.rpush(WORKER_IDS, self.uuid)
-        
+
         if not self.display_only:
             print("Started worker", self.uuid, "on host", self.redis.connection_pool.connection_kwargs.get("host"),
                   "under name", name)  # TODO log instead
         else:
             print("Streaming mode set. Running silent.")
-                  
+
         self.match = match
         self.env = Gym(match=self.match, pipe_id=os.getpid(), launch_preference=LaunchPreference.EPIC_LOGIN_TRICK,
                        use_injector=True)
         self.n_agents = self.match.agents
-        
 
     def _get_opponent_indices(self, n_new, n_old):
         if n_old == 0:
@@ -500,13 +520,13 @@ class RedisRolloutWorker:
                 post_stats = f"Rollout finished after {len(rollouts[0].observations)} steps, result was {str_result}"
                 if result != 0:
                     post_stats += f", goal speed: {goal_speed:.2f} kph"
-                    
-                if not self.display_only:        
+
+                if not self.display_only:
                     print(post_stats)
 
             if not self.display_only:
                 rollout_data = encode_buffers(rollouts, strict=encode)  # TODO change
-                # sanity_check = decode_buffers(rollout_data,
+                # sanity_check = decode_buffers(rollout_data, encode,
                 #                               lambda: self.match._obs_builder,
                 #                               lambda: self.match._reward_fn,
                 #                               lambda: self.match._action_parser)
