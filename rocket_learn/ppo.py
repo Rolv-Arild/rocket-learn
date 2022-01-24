@@ -56,7 +56,6 @@ class PPO:
         self.device = device
 
         self.starting_iteration = 0
-        self.tracer_obs = None
 
         # hyperparameters
         self.epochs = epochs
@@ -211,10 +210,6 @@ class PPO:
                 else:
                     x = obs_tensor.to(self.device)
                 values = self.agent.critic(x).detach().cpu().numpy().flatten()  # No batching?
-
-                #need to store an observation for later jit tracing/saving
-                if self.tracer_obs is None:
-                    self.tracer_obs = x[0]
 
                 last_values = values[-1]
                 last_gae_lam = 0
@@ -402,8 +397,3 @@ class PPO:
             'optimizer_state_dict': self.agent.optimizer.state_dict(),
             # TODO save/load reward normalization mean, std, count
         }, version_dir + "\\checkpoint.pt")
-
-        print(self.tracer_obs)
-        if save_actor_jit and self.tracer_obs.any() is not None:
-            traced_model = torch.jit.trace(self.agent.actor.net, self.tracer_obs)
-            torch.jit.save(traced_model, version_dir + "\\jit_model.pt")
