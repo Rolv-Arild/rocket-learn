@@ -3,9 +3,9 @@ import time
 from typing import Iterator
 
 import numpy as np
+
 import torch
 import torch as th
-import tqdm
 from torch.nn import functional as F
 from torch.nn.utils import clip_grad_norm_
 
@@ -13,6 +13,7 @@ from rocket_learn.agent.actor_critic_agent import ActorCriticAgent
 from rocket_learn.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
 
+from timeit import default_timer as timer
 
 class PPO:
     """
@@ -168,24 +169,22 @@ class PPO:
         return log_prob, entropy
 
     def calculate(self, buffers: Iterator[ExperienceBuffer], iteration):
+        startTime = timer()
         """
         Calculate loss and update network
         """
         obs_tensors = []
         act_tensors = []
-        # value_tensors = []
         log_prob_tensors = []
-        # advantage_tensors = []
-        returns_tensors = []
-        v_target_tensors = []
-
         rewards_tensors = []
+        returns_tensors = []
 
         ep_rewards = []
         ep_steps = []
         n = 0
 
         for buffer in buffers:  # Do discounts for each ExperienceBuffer individually
+            size = buffer.size()
             if isinstance(buffer.observations[0], (tuple, list)):
                 transposed = tuple(zip(*buffer.observations))
                 obs_tensor = tuple(torch.as_tensor(np.vstack(t)).float() for t in transposed)
@@ -195,48 +194,12 @@ class PPO:
             act_tensor = th.as_tensor(np.stack(buffer.actions))
             log_prob_tensor = th.as_tensor(np.stack(buffer.log_probs))
             rew_tensor = th.as_tensor(np.stack(buffer.rewards))
-            done_tensor = th.as_tensor(np.stack(buffer.dones))
-
-            size = rew_tensor.size()[0]
-            advantages = th.zeros((size,), dtype=th.float)
-            v_targets = th.zeros((size,), dtype=th.float)
-
-            episode_starts = th.roll(done_tensor, 1)
-            episode_starts[0] = 1.
-
-            ##### MOVE THIS TO WORKERS AND RUN IN NUMPY INSTEAD
-            ##### NEED TO ALSO SEND CRITIC
-
-            with th.no_grad():
-                if isinstance(obs_tensor, tuple):
-                    x = tuple(o.to(self.device) for o in obs_tensor)
-                else:
-                    x = obs_tensor.to(self.device)
-                values = self.agent.critic(x).detach().cpu().numpy().flatten()  # No batching?
-
-                last_values = values[-1]
-                last_gae_lam = 0
-                for step in reversed(range(size)):
-                    if step == size - 1:
-                        next_non_terminal = 1.0 - done_tensor[-1].item()
-                        next_values = last_values
-                    else:
-                        next_non_terminal = 1.0 - episode_starts[step + 1].item()
-                        next_values = values[step + 1]
-                    v_target = rew_tensor[step] + self.gamma * next_values * next_non_terminal
-                    delta = v_target - values[step]
-                    last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
-                    advantages[step] = last_gae_lam
-                    v_targets[step] = v_target
-
-            returns = advantages + values
+            returns_tensor = th.as_tensor(np.stack(buffer.returns))
 
             obs_tensors.append(obs_tensor)
             act_tensors.append(act_tensor)
             log_prob_tensors.append(log_prob_tensor)
-            # advantage_tensors.append(advantages)
-            returns_tensors.append(returns)
-            v_target_tensors.append(v_targets)
+            returns_tensors.append(returns_tensor)
             rewards_tensors.append(rew_tensor)
 
             ep_rewards.append(rew_tensor.sum())
@@ -258,7 +221,6 @@ class PPO:
             obs_tensor = th.cat(obs_tensors).float()
         act_tensor = th.cat(act_tensors)
         log_prob_tensor = th.cat(log_prob_tensors).float()
-        # advantages_tensor = th.cat(advantage_tensors)
         returns_tensor = th.cat(returns_tensors)
 
         tot_loss = 0
@@ -285,7 +247,6 @@ class PPO:
                 obs_batch = obs_tensor[indices]
             act_batch = act_tensor[indices]
             log_prob_batch = log_prob_tensor[indices]
-            # advantages_batch = advantages_tensor[indices]
             returns_batch = returns_tensor[indices]
 
             for i in range(0, self.batch_size, self.minibatch_size):
@@ -297,7 +258,6 @@ class PPO:
                     obs = obs_batch[i: i + self.minibatch_size].to(self.device)
 
                 act = act_batch[i: i + self.minibatch_size].to(self.device)
-                # adv = advantages_batch[i:i + self.minibatch_size].to(self.device)
                 ret = returns_batch[i: i + self.minibatch_size].to(self.device)
 
                 old_log_prob = log_prob_batch[i: i + self.minibatch_size].to(self.device)
@@ -358,8 +318,11 @@ class PPO:
             "clip_fraction": tot_clipped / n,
             "epoch_time": (t1 - t0) / (1e6 * self.epochs),
             "update_magnitude": th.dist(precompute, postcompute, p=2),
+            "calculation_time": timer() - startTime,
 
         }, step=iteration, commit=False)  # Is committed after when calculating fps
+
+
 
     def load(self, load_location, continue_iterations=True):
         """

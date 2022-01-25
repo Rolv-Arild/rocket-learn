@@ -84,24 +84,26 @@ def encode_buffers(buffers: List[ExperienceBuffer], strict=False, send_rewards=T
         states = np.asarray([encode_gamestate(info["state"]) for info in buffers[0].infos])
         actions = np.asarray([buffer.actions for buffer in buffers])
         log_probs = np.asarray([buffer.log_probs for buffer in buffers])
+        returns = np.asarray([buffer.returns for buffer in buffers])
         if send_rewards:
             rewards = np.asarray([buffer.rewards for buffer in buffers])
-            return states, actions, log_probs, rewards
-        return states, actions, log_probs
+            return states, actions, log_probs, rewards, returns
+        return states, actions, log_probs, returns
     else:
         return [
-            (buffer.meta, buffer.observations, buffer.actions, buffer.rewards, buffer.dones, buffer.log_probs)
+            (buffer.meta, buffer.observations, buffer.actions, buffer.rewards,
+             buffer.dones, buffer.log_probs, buffer.returns)
             for buffer in buffers
         ]
 
 
 def decode_buffers(enc_buffers, encoded, obs_build_factory=None, rew_func_factory=None, act_parse_factory=None):
     if encoded:
-        if len(enc_buffers) == 3:
-            game_states, actions, log_probs = enc_buffers
+        if len(enc_buffers) == 4:
+            game_states, actions, log_probs, returns = enc_buffers
             rewards = None
-        elif len(enc_buffers) == 4:
-            game_states, actions, log_probs, rewards = enc_buffers
+        elif len(enc_buffers) == 5:
+            game_states, actions, log_probs, rewards, returns = enc_buffers
         else:
             raise ValueError
 
@@ -119,7 +121,7 @@ def decode_buffers(enc_buffers, encoded, obs_build_factory=None, rew_func_factor
             dones[-1, :] = True
             buffers = [
                 ExperienceBuffer(observations=[obs[i]], actions=actions[i], rewards=rewards[i], dones=dones[i],
-                                 log_probs=log_probs[i])
+                                 log_probs=log_probs[i], returns=returns[i])
                 for i in range(len(obs))
             ]
             return buffers
@@ -153,17 +155,17 @@ def decode_buffers(enc_buffers, encoded, obs_build_factory=None, rew_func_factor
                         rew = rew_func.get_reward(player, gs, env_actions[s][i])
                 else:
                     rew = rewards[i][s]
-                buffers[i].add_step(old_obs[i], actions[i][s], rew, final, log_probs[i][s], {"state": gs})
+                buffers[i].add_step_with_return(old_obs[i], actions[i][s], rew, final, log_probs[i][s], {"state": gs}, returns[i][s])
                 obss.append(obs)
 
         return buffers
     else:
         buffers = []
         for enc_buffer in enc_buffers:
-            meta, obs, actions, rews, dones, log_probs = enc_buffer
+            meta, obs, actions, rews, dones, log_probs, returns = enc_buffer
             buffers.append(
                 ExperienceBuffer(meta=meta, observations=obs, actions=actions,
-                                 rewards=rews, dones=dones, log_probs=log_probs)
+                                 rewards=rews, dones=dones, log_probs=log_probs, returns=returns)
             )
         return buffers
 
@@ -535,8 +537,8 @@ class RedisRolloutWorker:
                     print(post_stats)
 
             if not self.display_only:
-                dummyGamma = 1
-                dummyGae = 1
+                dummyGamma = 0.99
+                dummyGae = 0.95
                 dummyDevice = "cpu"
 
                 for r in rollouts:

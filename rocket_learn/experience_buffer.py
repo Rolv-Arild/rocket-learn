@@ -46,6 +46,16 @@ class ExperienceBuffer:
         self.log_probs.append(log_prob)
         self.infos.append(info)
 
+    #TODO remove after testing is done. This is probably not the best way to do this
+    def add_step_with_return(self, observation, action, reward, done, log_prob, info, returns):
+        self.observations.append(observation)
+        self.actions.append(action)
+        self.rewards.append(reward)
+        self.dones.append(done)
+        self.log_probs.append(log_prob)
+        self.infos.append(info)
+        self.returns.append(returns)
+
     def clear(self):
         self.observations = []
         self.actions = []
@@ -67,7 +77,7 @@ class ExperienceBuffer:
 
 
     def calculate_returns(self, critic, gamma, gae_lambda, device):
-        assert self.size() is not 0
+        assert self.size() != 0
 
         rew_tensor = th.as_tensor(np.stack(self.rewards))
         done_tensor = th.as_tensor(np.stack(self.dones))
@@ -104,5 +114,4 @@ class ExperienceBuffer:
                 v_targets[step] = v_target
 
         returns = advantages + values
-        self.returns = returns
-        assert self.returns == self.size()
+        self.returns = returns.cpu().detach().numpy()
