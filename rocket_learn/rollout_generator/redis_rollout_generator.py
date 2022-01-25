@@ -44,6 +44,7 @@ N_UPDATES = "num-updates"
 SAVE_FREQ = "save-freq"
 
 MODEL_LATEST = "model-latest"
+MODEL_CRITIC_LATEST = "model-critic-latest"
 VERSION_LATEST = "model-version"
 
 ROLLOUTS = "rollout"
@@ -51,8 +52,8 @@ OPPONENT_MODELS = "opponent-models"
 WORKER_IDS = "worker-ids"
 CONTRIBUTORS = "contributors"
 _ALL = (
-    QUALITIES, N_UPDATES, SAVE_FREQ, MODEL_LATEST, VERSION_LATEST, ROLLOUTS, OPPONENT_MODELS,
-    WORKER_IDS, CONTRIBUTORS)
+    QUALITIES, N_UPDATES, SAVE_FREQ, MODEL_LATEST, MODEL_CRITIC_LATEST, VERSION_LATEST,
+    ROLLOUTS, OPPONENT_MODELS, WORKER_IDS, CONTRIBUTORS)
 
 m.patch()
 
@@ -328,13 +329,16 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             quality = Rating(0, 1)  # First (typically random) agent is initialized at 0
         self.redis.rpush(QUALITIES, _serialize(tuple(quality)))
 
-    def update_parameters(self, new_params):
+    def update_parameters(self, new_actor_params, new_critic_params):
         """
         update redis (and thus workers) with new model data and save data as future opponent
-        :param new_params: new model parameters
+        :param new_actor_params: new actor model parameters
+        :param new_critic_params: new critic model parameters
         """
-        model_bytes = _serialize_model(new_params)
+        model_bytes = _serialize_model(new_actor_params)
+        model_critic_bytes = _serialize_model(new_critic_params)
         self.redis.set(MODEL_LATEST, model_bytes)
+        self.redis.set(MODEL_CRITIC_LATEST, model_critic_bytes)
         self.redis.decr(VERSION_LATEST)
 
         print("Top contributors:\n" + "\n".join(f"{c}: {n}" for c, n in self.contributors.most_common(5)))
@@ -362,7 +366,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             try:
                 self.redis.save()
             except ResponseError:
-                print("redis manual save aborted, save already in progress")
+                print("rocket-learn redis save aborted, save already in progress")
 
 
 class RedisRolloutWorker:
@@ -380,6 +384,7 @@ class RedisRolloutWorker:
         self.display_only = display_only
 
         self.current_agent = _unserialize_model(self.redis.get(MODEL_LATEST))
+        self.current_critic = _unserialize_model(self.redis.get(MODEL_CRITIC_LATEST))
         self.current_version_prob = current_version_prob
         self.evaluation_prob = evaluation_prob
         self.sigma_target = sigma_target
@@ -470,12 +475,17 @@ class RedisRolloutWorker:
             # Only try to download latest version when new
             if latest_version != available_version:
                 model_bytes = self.redis.get(MODEL_LATEST)
-                if model_bytes is None:
+                critic_bytes = self.redis.get(MODEL_CRITIC_LATEST)
+                if model_bytes is None or critic_bytes is None:
                     time.sleep(1)
                     continue  # This is maybe not necessary? Can't hurt to leave it in.
+
                 latest_version = available_version
                 updated_agent = _unserialize_model(model_bytes)
                 self.current_agent = updated_agent
+
+                updated_critic = _unserialize_model(critic_bytes)
+                self.current_critic = updated_critic
 
             n += 1
 
@@ -525,6 +535,13 @@ class RedisRolloutWorker:
                     print(post_stats)
 
             if not self.display_only:
+                dummyGamma = 1
+                dummyGae = 1
+                dummyDevice = "cpu"
+
+                for r in rollouts:
+                    r.calculate_returns(self.current_critic, dummyGamma, dummyGae, dummyDevice)
+
                 rollout_data = encode_buffers(rollouts, strict=encode)  # TODO change
                 # sanity_check = decode_buffers(rollout_data, encode,
                 #                               lambda: self.match._obs_builder,

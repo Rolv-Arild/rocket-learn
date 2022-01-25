@@ -120,7 +120,7 @@ class PPO:
         iteration = self.starting_iteration
         rollout_gen = self.rollout_generator.generate_rollouts()
 
-        self.rollout_generator.update_parameters(self.agent.actor)
+        self.rollout_generator.update_parameters(self.agent.actor, self.agent.critic)
 
         while True:
             t0 = time.time()
@@ -145,7 +145,7 @@ class PPO:
             if save_dir and iteration % iterations_per_save == 0:
                 self.save(current_run_dir, iteration, save_jit)  # noqa
 
-            self.rollout_generator.update_parameters(self.agent.actor)
+            self.rollout_generator.update_parameters(self.agent.actor, self.agent.critic)
 
             self.total_steps += self.n_steps  # size
             t1 = time.time()
@@ -203,6 +203,9 @@ class PPO:
 
             episode_starts = th.roll(done_tensor, 1)
             episode_starts[0] = 1.
+
+            ##### MOVE THIS TO WORKERS AND RUN IN NUMPY INSTEAD
+            ##### NEED TO ALSO SEND CRITIC
 
             with th.no_grad():
                 if isinstance(obs_tensor, tuple):
