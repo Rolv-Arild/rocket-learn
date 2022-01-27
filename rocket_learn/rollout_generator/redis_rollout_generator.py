@@ -249,33 +249,43 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         return relevant_buffers
 
     def generate_rollouts(self) -> Iterator[ExperienceBuffer]:
-        # while True:
-        #     relevant_buffers = self._process_rollout()
-        #     if relevant_buffers is not None:
-        #         yield from relevant_buffers
-        futures = []
-        with ProcessPoolExecutor(psutil.cpu_count(logical=False)) as ex:
-            while True:
-                # Kinda scuffed ngl
-                if len(futures) > 0 and futures[0].done():
-                    res = futures.pop(0).result()
-                    if res is not None:
-                        latest_version = int(self.redis.get(VERSION_LATEST))
-                        buffers, versions, uuid, name, result = res
-                        relevant_buffers = self._update_ratings(name, versions, buffers, latest_version, result)
-                        yield from relevant_buffers
-                elif len(futures) < os.cpu_count():
-                    latest_version = int(self.redis.get(VERSION_LATEST))
-                    data = self.redis.blpop(ROLLOUTS)[1]
-                    self.tot_bytes += len(data)
-                    futures.append(ex.submit(
-                        RedisRolloutGenerator._process_rollout,
-                        data,
-                        latest_version,
-                        CloudpickleWrapper(self.obs_build_func),
-                        CloudpickleWrapper(self.rew_func_factory),
-                        CloudpickleWrapper(self.act_parse_factory)
-                    ))
+        while True:
+            latest_version = int(self.redis.get(VERSION_LATEST))
+            data = self.redis.blpop(ROLLOUTS)[1]
+            self.tot_bytes += len(data)
+            res = self._process_rollout(
+                data, latest_version,
+                self.obs_build_func, self.rew_func_factory, self.act_parse_factory
+            )
+            if res is not None:
+                buffers, versions, uuid, name, result = res
+                relevant_buffers = self._update_ratings(name, versions, buffers, latest_version, result)
+                yield from relevant_buffers
+
+        # futures = []
+        # cpus = psutil.cpu_count(logical=False)
+        # with ProcessPoolExecutor(cpus) as ex:
+        #     while True:
+        #         # Kinda scuffed ngl
+        #         if len(futures) > 0 and futures[0].done():
+        #             res = futures.pop(0).result()
+        #             if res is not None:
+        #                 latest_version = int(self.redis.get(VERSION_LATEST))
+        #                 buffers, versions, uuid, name, result = res
+        #                 relevant_buffers = self._update_ratings(name, versions, buffers, latest_version, result)
+        #                 yield from relevant_buffers
+        #         elif len(futures) < 2 * cpus:
+        #             latest_version = int(self.redis.get(VERSION_LATEST))
+        #             data = self.redis.blpop(ROLLOUTS)[1]
+        #             self.tot_bytes += len(data)
+        #             futures.append(ex.submit(
+        #                 RedisRolloutGenerator._process_rollout,
+        #                 data,
+        #                 latest_version,
+        #                 CloudpickleWrapper(self.obs_build_func),
+        #                 CloudpickleWrapper(self.rew_func_factory),
+        #                 CloudpickleWrapper(self.act_parse_factory)
+        #             ))
 
     def _plot_ratings(self, ratings):
         if len(ratings) <= 0:
@@ -533,13 +543,15 @@ class RedisRolloutWorker:
                 #                               lambda: self.match._action_parser)
                 rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result,
                                             encode))
-                t.join()
+                while True:
+                    t.join()
 
-                def send():
-                    n_items = self.redis.rpush(ROLLOUTS, rollout_bytes)
-                    if n_items >= 1000:
-                        print("Had to limit rollouts. Learner may have have crashed, or is overloaded")
-                        self.redis.ltrim(ROLLOUTS, -100, -1)
+                    def send():
+                        n_items = self.redis.rpush(ROLLOUTS, rollout_bytes)
+                        if n_items >= 1000:
+                            print("Had to limit rollouts. Learner may have have crashed, or is overloaded")
+                            self.redis.ltrim(ROLLOUTS, -100, -1)
 
-                t = Thread(target=send)
-                t.start()
+                    t = Thread(target=send)
+                    t.start()
+                    time.sleep(0.01)

@@ -1,7 +1,11 @@
+import cProfile
+import io
 import os
+import pstats
 import time
 from typing import Iterator
 
+import numba
 import numpy as np
 import torch
 import torch as th
@@ -56,7 +60,6 @@ class PPO:
         self.device = device
 
         self.starting_iteration = 0
-        self.tracer_obs = None
 
         # hyperparameters
         self.epochs = epochs
@@ -124,6 +127,8 @@ class PPO:
         self.rollout_generator.update_parameters(self.agent.actor)
 
         while True:
+            # pr = cProfile.Profile()
+            # pr.enable()
             t0 = time.time()
 
             def _iter():
@@ -152,6 +157,12 @@ class PPO:
             t1 = time.time()
             self.logger.log({"fps": self.n_steps / (t1 - t0), "total_timesteps": self.total_steps})
 
+            # pr.disable()
+            # s = io.StringIO()
+            # sortby = pstats.SortKey.CUMULATIVE
+            # ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+            # ps.dump_stats(f"profile_{self.total_steps}")
+
     def set_logger(self, logger):
         self.logger = logger
 
@@ -168,6 +179,32 @@ class PPO:
         entropy = -torch.mean(entropy)
         return log_prob, entropy
 
+    @staticmethod
+    @numba.njit
+    def _calculate_advantages_numba(rewards, values, gamma, gae_lambda):
+        advantages = np.zeros_like(rewards)
+        # v_targets = np.zeros_like(rewards)
+        dones = np.zeros_like(rewards)
+        dones[-1] = 1.
+        episode_starts = np.zeros_like(rewards)
+        episode_starts[0] = 1.
+        last_values = values[-1]
+        last_gae_lam = 0
+        size = len(advantages)
+        for step in range(size - 1, -1, -1):
+            if step == size - 1:
+                next_non_terminal = 1.0 - dones[-1].item()
+                next_values = last_values
+            else:
+                next_non_terminal = 1.0 - episode_starts[step + 1].item()
+                next_values = values[step + 1]
+            v_target = rewards[step] + gamma * next_values * next_non_terminal
+            delta = v_target - values[step]
+            last_gae_lam = delta + gamma * gae_lambda * next_non_terminal * last_gae_lam
+            advantages[step] = last_gae_lam
+            # v_targets[step] = v_target
+        return advantages  # , v_targets
+
     def calculate(self, buffers: Iterator[ExperienceBuffer], iteration):
         """
         Calculate loss and update network
@@ -178,7 +215,6 @@ class PPO:
         log_prob_tensors = []
         # advantage_tensors = []
         returns_tensors = []
-        v_target_tensors = []
 
         rewards_tensors = []
 
@@ -189,21 +225,9 @@ class PPO:
         for buffer in buffers:  # Do discounts for each ExperienceBuffer individually
             if isinstance(buffer.observations[0], (tuple, list)):
                 transposed = tuple(zip(*buffer.observations))
-                obs_tensor = tuple(torch.as_tensor(np.vstack(t)).float() for t in transposed)
+                obs_tensor = tuple(torch.from_numpy(np.vstack(t)).float() for t in transposed)
             else:
-                obs_tensor = th.as_tensor(np.stack(buffer.observations)).float()
-
-            act_tensor = th.as_tensor(np.stack(buffer.actions))
-            log_prob_tensor = th.as_tensor(np.stack(buffer.log_probs))
-            rew_tensor = th.as_tensor(np.stack(buffer.rewards))
-            done_tensor = th.as_tensor(np.stack(buffer.dones))
-
-            size = rew_tensor.size()[0]
-            advantages = th.zeros((size,), dtype=th.float)
-            v_targets = th.zeros((size,), dtype=th.float)
-
-            episode_starts = th.roll(done_tensor, 1)
-            episode_starts[0] = 1.
+                obs_tensor = th.from_numpy(np.stack(buffer.observations)).float()
 
             with th.no_grad():
                 if isinstance(obs_tensor, tuple):
@@ -212,36 +236,28 @@ class PPO:
                     x = obs_tensor.to(self.device)
                 values = self.agent.critic(x).detach().cpu().numpy().flatten()  # No batching?
 
-                #need to store an observation for later jit tracing/saving
-                if self.tracer_obs is None:
-                    self.tracer_obs = x[0]
+            actions = np.stack(buffer.actions)
+            log_probs = np.stack(buffer.log_probs)
+            rewards = np.stack(buffer.rewards)
+            dones = np.stack(buffer.dones)
 
-                last_values = values[-1]
-                last_gae_lam = 0
-                for step in reversed(range(size)):
-                    if step == size - 1:
-                        next_non_terminal = 1.0 - done_tensor[-1].item()
-                        next_values = last_values
-                    else:
-                        next_non_terminal = 1.0 - episode_starts[step + 1].item()
-                        next_values = values[step + 1]
-                    v_target = rew_tensor[step] + self.gamma * next_values * next_non_terminal
-                    delta = v_target - values[step]
-                    last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
-                    advantages[step] = last_gae_lam
-                    v_targets[step] = v_target
+            size = rewards.shape[0]
+
+            episode_starts = np.roll(dones, 1)
+            episode_starts[0] = 1.
+
+            advantages = self._calculate_advantages_numba(rewards, values, self.gamma, self.gae_lambda)
 
             returns = advantages + values
 
             obs_tensors.append(obs_tensor)
-            act_tensors.append(act_tensor)
-            log_prob_tensors.append(log_prob_tensor)
+            act_tensors.append(th.from_numpy(actions))
+            log_prob_tensors.append(th.from_numpy(log_probs))
             # advantage_tensors.append(advantages)
-            returns_tensors.append(returns)
-            v_target_tensors.append(v_targets)
-            rewards_tensors.append(rew_tensor)
+            returns_tensors.append(th.from_numpy(returns))
+            rewards_tensors.append(th.from_numpy(rewards))
 
-            ep_rewards.append(rew_tensor.sum())
+            ep_rewards.append(rewards.sum())
             ep_steps.append(size)
             n += 1
         ep_rewards = np.array(ep_rewards)
@@ -261,7 +277,7 @@ class PPO:
         act_tensor = th.cat(act_tensors)
         log_prob_tensor = th.cat(log_prob_tensors).float()
         # advantages_tensor = th.cat(advantage_tensors)
-        returns_tensor = th.cat(returns_tensors)
+        returns_tensor = th.cat(returns_tensors).float()
 
         tot_loss = 0
         tot_policy_loss = 0
@@ -402,8 +418,3 @@ class PPO:
             'optimizer_state_dict': self.agent.optimizer.state_dict(),
             # TODO save/load reward normalization mean, std, count
         }, version_dir + "\\checkpoint.pt")
-
-        print(self.tracer_obs)
-        if save_actor_jit and self.tracer_obs.any() is not None:
-            traced_model = torch.jit.trace(self.agent.actor.net, self.tracer_obs)
-            torch.jit.save(traced_model, version_dir + "\\jit_model.pt")
