@@ -543,15 +543,15 @@ class RedisRolloutWorker:
                 #                               lambda: self.match._action_parser)
                 rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result,
                                             encode))
-                while True:
-                    t.join()
+                # while True:
+                t.join()
 
-                    def send():
-                        n_items = self.redis.rpush(ROLLOUTS, rollout_bytes)
-                        if n_items >= 1000:
-                            print("Had to limit rollouts. Learner may have have crashed, or is overloaded")
-                            self.redis.ltrim(ROLLOUTS, -100, -1)
+                def send():
+                    n_items = self.redis.rpush(ROLLOUTS, rollout_bytes)
+                    if n_items >= 1000:
+                        print("Had to limit rollouts. Learner may have have crashed, or is overloaded")
+                        self.redis.ltrim(ROLLOUTS, -100, -1)
 
-                    t = Thread(target=send)
-                    t.start()
-                    time.sleep(0.01)
+                t = Thread(target=send)
+                t.start()
+                time.sleep(0.01)
