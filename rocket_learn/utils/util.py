@@ -38,11 +38,6 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
 
     last_state = info['state']  # game_state for obs_building of other agents
 
-    for p in policies:
-        print(isinstance(p, PretrainedDiscretePolicy))
-        print(isinstance(p, HardcodedAgent))
-        print(isinstance(p, Policy))
-
     latest_policy_indices = [0 if isinstance(p, PretrainedDiscretePolicy) or isinstance(p, HardcodedAgent)
                              else 1 for p in policies]
     # rollouts for all latest_policies
@@ -50,8 +45,6 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
         ExperienceBuffer(infos=[info])
         for _ in range(sum(latest_policy_indices))
     ]
-
-   # ep_rews = [0 for _ in range(len(policies))]
 
     with torch.no_grad():
         while True:
@@ -107,9 +100,6 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
             # Might be different if only one agent?
             for exp_buf, obs, act, rew, log_prob in zip(rollouts, old_obs, all_indices, rewards, all_log_probs):
                 exp_buf.add_step(obs, act, rew, done, log_prob, info)
-
-            #for i in range(len(policies)):
-            #    ep_rews[i] += rewards[i]
 
             if done:
                 result += info["result"]

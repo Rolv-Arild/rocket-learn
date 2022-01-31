@@ -504,8 +504,6 @@ class RedisRolloutWorker:
 
             n += 1
 
-            # ** new current version prob = 1 - (old vers prob + sum(all_pretrained_prob))**
-
             # TODO customizable past agent selection, should team only be same agent?
             pretrained_choice = None
             n_old = 0
