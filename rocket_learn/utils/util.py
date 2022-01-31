@@ -12,11 +12,13 @@ from rlgym.utils.state_setters import DefaultState
 from torch import nn
 
 from rocket_learn.agent.policy import Policy
+from rocket_learn.agent.pretrained_policy import PretrainedDiscretePolicy, HardcodedAgent
+
 from rocket_learn.experience_buffer import ExperienceBuffer
 from rlgym.utils.terminal_conditions.common_conditions import GoalScoredCondition
 
 
-def generate_episode(env: Gym, policies: List[Policy], evaluate=False) -> (List[ExperienceBuffer], int):
+def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuffer], int):
     """
     create experience buffer data by interacting with the environment(s)
     """
@@ -34,11 +36,22 @@ def generate_episode(env: Gym, policies: List[Policy], evaluate=False) -> (List[
     observations, info = env.reset(return_info=True)
     result = 0
 
+    last_state = info['state']  # game_state for obs_building of other agents
+
+    for p in policies:
+        print(isinstance(p, PretrainedDiscretePolicy))
+        print(isinstance(p, HardcodedAgent))
+        print(isinstance(p, Policy))
+
+    latest_policy_indices = [0 if isinstance(p, PretrainedDiscretePolicy) or isinstance(p, HardcodedAgent)
+                             else 1 for p in policies]
+    # rollouts for all latest_policies
     rollouts = [
         ExperienceBuffer(infos=[info])
-        for _ in range(len(policies))
+        for _ in range(sum(latest_policy_indices))
     ]
-    ep_rews = [0 for _ in range(len(policies))]
+
+   # ep_rews = [0 for _ in range(len(policies))]
 
     with torch.no_grad():
         while True:
@@ -51,26 +64,52 @@ def generate_episode(env: Gym, policies: List[Policy], evaluate=False) -> (List[
                 observations = [observations]
 
             for policy, obs in zip(policies, observations):
-                dist = policy.get_action_distribution(obs)
-                action_indices = policy.sample_action(dist, deterministic=False)
-                log_probs = policy.log_prob(dist, action_indices).item()
-                actions = policy.env_compatible(action_indices)
+                if isinstance(policy, Policy):
+                    if isinstance(policy, PretrainedDiscretePolicy):
+                        obs = policy.build_obs(last_state)
 
-                all_indices.append(action_indices.numpy())
-                all_actions.append(actions)
-                all_log_probs.append(log_probs)
+                    dist = policy.get_action_distribution(obs)
+                    action_indices = policy.sample_action(dist, deterministic=False)
+                    log_probs = policy.log_prob(dist, action_indices).item()
+                    actions = policy.env_compatible(action_indices)
+
+                    all_indices.append(action_indices.numpy())
+                    all_actions.append(actions)
+                    all_log_probs.append(log_probs)
+
+                elif isinstance(policy, HardcodedAgent):
+                    actions = policy.act(last_state)
+                    if not isinstance(observations, np.ndarray):
+                        actions = np.array(actions)
+
+                    # TODO: add converter that takes normal 8 actions into action space
+                    #actions = env._match._action_parser.convert_to_action_space(actions)
+
+                    all_indices.append(None)
+                    all_actions.append(actions)
+                    all_log_probs.append(None)
+
+                else:
+                    assert type(policy) and ": type use not defined"
 
             all_actions = np.array(all_actions)
             old_obs = observations
             observations, rewards, done, info = env.step(all_actions)
             if len(policies) <= 1:
                 observations, rewards = [observations], [rewards]
+
+            #prune data that belongs to old agents
+            old_obs = [a for i, a in enumerate(old_obs) if latest_policy_indices[i] == 1]
+            all_indices = [d for i, d in enumerate(all_indices) if latest_policy_indices[i] == 1]
+            rewards = [r for i, r in enumerate(rewards) if latest_policy_indices[i] == 1]
+            all_log_probs = [r for i, r in enumerate(all_log_probs) if latest_policy_indices[i] == 1]
+
             # Might be different if only one agent?
             for exp_buf, obs, act, rew, log_prob in zip(rollouts, old_obs, all_indices, rewards, all_log_probs):
                 exp_buf.add_step(obs, act, rew, done, log_prob, info)
 
-            for i in range(len(policies)):
-                ep_rews[i] += rewards[i]
+            #for i in range(len(policies)):
+            #    ep_rews[i] += rewards[i]
 
             if done:
                 result += info["result"]
@@ -80,6 +119,8 @@ def generate_episode(env: Gym, policies: List[Policy], evaluate=False) -> (List[
                     break
                 else:
                     observations, info = env.reset(return_info=True)
+
+            last_state = info['state']
 
     if evaluate:
         env._match._terminal_conditions = terminals  # noqa

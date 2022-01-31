@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 
 from torch import nn
 
-
 class Policy(nn.Module, ABC):
     @abstractmethod
     def forward(self, *args, **kwargs): raise NotImplementedError

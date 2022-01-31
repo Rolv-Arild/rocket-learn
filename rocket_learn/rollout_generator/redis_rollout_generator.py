@@ -202,6 +202,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.rew_func_factory = rew_func_factory
         self.act_parse_factory = act_parse_factory
         self.mmr_min_episode_length = mmr_min_episode_length
+        self.pretrained_agents = {}
 
     @staticmethod
     def _process_rollout(rollout_bytes, latest_version, obs_build_func, rew_build_func, act_build_func):
@@ -381,20 +382,26 @@ class RedisRolloutWorker:
     """
 
     def __init__(self, redis: Redis, name: str, match: Match,
-                 current_version_prob=.8, evaluation_prob=0.01, sigma_target=1,
-                 display_only=False, send_gamestates=True, jit_compile=False):
+                 past_version_prob=.2, evaluation_prob=0.01, sigma_target=1,
+                 display_only=False, send_gamestates=True, pretrained_agents=None):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
 
+        self.pretrained_agents = {}
+        self.pretrained_total_prob = 0
+        if pretrained_agents is not None:
+            self.pretrained_agents = pretrained_agents
+            self.pretrained_total_prob = sum([self.pretrained_agents[key] for key in self.pretrained_agents])
+
+
         self.display_only = display_only
 
         self.current_agent = _unserialize_model(self.redis.get(MODEL_LATEST))
-        self.current_version_prob = current_version_prob
+        self.past_version_prob = past_version_prob
         self.evaluation_prob = evaluation_prob
         self.sigma_target = sigma_target
         self.send_gamestates = send_gamestates
-        self.jit_compile = jit_compile
 
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.uuid = str(uuid4())
@@ -411,7 +418,7 @@ class RedisRolloutWorker:
                        use_injector=True)
         self.n_agents = self.match.agents
 
-    def _get_opponent_indices(self, n_new, n_old):
+    def _get_opponent_indices(self, n_new, n_old, pretrained_choice):
         if n_old == 0:
             return [-1] * n_new
         # Get qualities
@@ -428,6 +435,13 @@ class RedisRolloutWorker:
             versions = [np.random.choice(len(ratings), p=probs)]
             target_rating = ratings[versions[0]]
             n_old -= 1
+        elif pretrained_choice != None: #pretrained agent chosen, just need index generation
+            matchups = np.full((n_new+n_old), -1)
+            for i in range(n_old):
+                index = np.random.randint(0, n_new+n_old)
+                matchups[index] = 1
+                return matchups
+
         else:
             versions = [-1] * n_new
             target_rating = ratings[-1]
@@ -490,21 +504,35 @@ class RedisRolloutWorker:
 
             n += 1
 
+            # ** new current version prob = 1 - (old vers prob + sum(all_pretrained_prob))**
+
             # TODO customizable past agent selection, should team only be same agent?
+            pretrained_choice = None
             n_old = 0
             if self.n_agents > 1:
                 r = np.random.random()
+                rand_choice = (r - self.evaluation_prob) / (1 - self.evaluation_prob)
+
                 if r < self.evaluation_prob:
                     n_old = self.n_agents
-                elif (r - self.evaluation_prob) / (1 - self.evaluation_prob) > self.current_version_prob:
+                elif rand_choice < self.past_version_prob:
                     n_old = np.random.randint(low=1, high=self.n_agents)
+                elif rand_choice < (self.past_version_prob + self.pretrained_total_prob):
+                    for agent in self.pretrained_agents:
+                        if rand_choice < (self.past_version_prob + self.pretrained_agents[agent]):
+                            pretrained_choice = agent
+                            n_old = np.random.randint(low=1, high=self.n_agents)
+                            break
+
 
             n_new = self.n_agents - n_old
-            versions = self._get_opponent_indices(n_new, n_old)
+            versions = self._get_opponent_indices(n_new, n_old,pretrained_choice)
             agents = []
             for version in versions:
                 if version == -1:
                     agents.append(self.current_agent)
+                elif pretrained_choice is not None and version == 1:
+                    agents.append(pretrained_choice)
                 else:
                     selected_agent = self._get_past_model(version)
                     agents.append(selected_agent)
@@ -518,8 +546,20 @@ class RedisRolloutWorker:
                 print("Evaluation finished, goal differential:", result)
                 encode = False
             else:
+                version_info = []
+                pruned_versions = []
+                for v in versions:
+                    if pretrained_choice is not None and v > 0: #print name but don't send it back
+                        choice_name = str(type(pretrained_choice).__name__)
+                        version_info.append(choice_name)
+                    else:
+                        version_info.append(str(v))
+                        pruned_versions.append(v)
+                versions = pruned_versions
+
+
                 if not self.display_only:
-                    print("Generating rollout with versions:", versions)
+                    print("Generating rollout with versions:", version_info)
 
                 rollouts, result = util.generate_episode(self.env, agents, evaluate=False)
                 if len(rollouts[0].observations) <= 1:
