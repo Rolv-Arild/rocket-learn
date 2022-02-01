@@ -99,7 +99,7 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
 
             # Might be different if only one agent?
             for exp_buf, obs, act, rew, log_prob in zip(rollouts, old_obs, all_indices, rewards, all_log_probs):
-                exp_buf.add_step(obs, act, rew, done, log_prob, info)
+                exp_buf.add_step(np.squeeze(obs), np.squeeze(act), rew, done, log_prob, info)
 
             if done:
                 result += info["result"]
