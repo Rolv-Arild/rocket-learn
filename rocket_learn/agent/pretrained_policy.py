@@ -12,16 +12,14 @@ class PretrainedDiscretePolicy(DiscretePolicy):
     """
         A rocket-learn discrete policy pretrained and imported to be trained against
 
-        :param agent_name: Name of agent, used to identify it during runs
         :param obs_builder_func: Function that will generate the correct observation from the gamestate
         :param net: policy net
         :param shape: action distribution shape
     """
 
-    def __init__(self, agent_name, obs_builder_func, net: nn.Module, shape: Tuple[int, ...] = (3,) * 5 + (2,) * 3):
+    def __init__(self, obs_builder_func, net: nn.Module, shape: Tuple[int, ...] = (3,) * 5 + (2,) * 3):
         super().__init__(net, shape)
         self.obs_builder_func = obs_builder_func
-        self.agent_name = agent_name
 
     def build_obs(self, state: GameState):
         return self.obs_builder_func(state)
@@ -36,7 +34,7 @@ class HardcodedAgent(ABC):
     def act(self, state: GameState): raise NotImplementedError
 
 
-class DemoJumpAgent(HardcodedAgent):
+class DemoDriveAgent(HardcodedAgent):
     def act(self, state: GameState):
-        return [0, 0, 1, 0, 0]
+        return [2, 1, 0, 0, 0]
 
