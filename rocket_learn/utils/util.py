@@ -57,21 +57,10 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
                 observations = [observations]
 
             for policy, obs in zip(policies, observations):
-                if isinstance(policy, Policy):
-                    if isinstance(policy, PretrainedDiscretePolicy):
-                        obs = policy.build_obs(last_state)
-
-                    dist = policy.get_action_distribution(obs)
-                    action_indices = policy.sample_action(dist, deterministic=False)
-                    log_probs = policy.log_prob(dist, action_indices).item()
-                    actions = policy.env_compatible(action_indices)
-
-                    all_indices.append(action_indices.numpy())
-                    all_actions.append(actions)
-                    all_log_probs.append(log_probs)
-
-                elif isinstance(policy, HardcodedAgent):
+                if isinstance(policy, HardcodedAgent):
                     actions = policy.act(last_state)
+
+                    #make sure output is in correct format
                     if not isinstance(observations, np.ndarray):
                         actions = np.array(actions)
 
@@ -82,8 +71,20 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
                     all_actions.append(actions)
                     all_log_probs.append(None)
 
+                elif isinstance(policy, Policy):
+
+                    dist = policy.get_action_distribution(obs)
+                    action_indices = policy.sample_action(dist, deterministic=False)
+                    log_probs = policy.log_prob(dist, action_indices).item()
+                    actions = policy.env_compatible(action_indices)
+
+                    all_indices.append(action_indices.numpy())
+                    all_actions.append(actions)
+                    all_log_probs.append(log_probs)
+
                 else:
-                    assert type(policy) and ": type use not defined"
+                    print(str(type(policy)) + " type use not defined")
+                    assert False
 
             all_actions = np.array(all_actions)
             old_obs = observations

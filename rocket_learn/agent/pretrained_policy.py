@@ -8,7 +8,19 @@ from rocket_learn.agent.discrete_policy import DiscretePolicy
 from rlgym.utils.gamestates import GameState
 
 
-class PretrainedDiscretePolicy(DiscretePolicy):
+
+
+
+class HardcodedAgent(ABC):
+    """
+        An external bot prebuilt and imported to be trained against
+    """
+
+    @abstractmethod
+    def act(self, state: GameState): raise NotImplementedError
+
+
+class PretrainedDiscretePolicy(DiscretePolicy, HardcodedAgent):
     """
         A rocket-learn discrete policy pretrained and imported to be trained against
 
@@ -21,18 +33,13 @@ class PretrainedDiscretePolicy(DiscretePolicy):
         super().__init__(net, shape)
         self.obs_builder_func = obs_builder_func
 
-    def build_obs(self, state: GameState):
-        return self.obs_builder_func(state)
+    def act(self, state: GameState):
+        obs = self.obs_builder_func(state)
+        dist = policy.get_action_distribution(obs)
+        action_indices = policy.sample_action(dist, deterministic=False)
+        actions = policy.env_compatible(action_indices)
 
-
-class HardcodedAgent(ABC):
-    """
-        An external bot prebuilt and imported to be trained against
-    """
-
-    @abstractmethod
-    def act(self, state: GameState): raise NotImplementedError
-
+        return actions
 
 class DemoDriveAgent(HardcodedAgent):
     def act(self, state: GameState):
