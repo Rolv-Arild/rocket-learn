@@ -8,9 +8,6 @@ from rocket_learn.agent.discrete_policy import DiscretePolicy
 from rlgym.utils.gamestates import GameState
 
 
-
-
-
 class HardcodedAgent(ABC):
     """
         An external bot prebuilt and imported to be trained against

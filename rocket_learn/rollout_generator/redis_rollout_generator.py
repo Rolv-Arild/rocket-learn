@@ -560,14 +560,11 @@ class RedisRolloutWorker:
                 encode = False
             else:
                 version_info = []
-                # pruned_versions = []
                 for v in versions:
                     if pretrained_choice is not None and v == 'na':  # print name but don't send it back
                         version_info.append(str(type(pretrained_choice).__name__))
                     else:
                         version_info.append(str(v))
-                        # pruned_versions.append(v)
-                # versions = pruned_versions
 
                 if not self.display_only:
                     print("Generating rollout with versions:", version_info)

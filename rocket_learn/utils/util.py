@@ -38,8 +38,7 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
 
     last_state = info['state']  # game_state for obs_building of other agents
 
-    latest_policy_indices = [0 if isinstance(p, PretrainedDiscretePolicy) or isinstance(p, HardcodedAgent)
-                             else 1 for p in policies]
+    latest_policy_indices = [0 if isinstance(p, HardcodedAgent) else 1 for p in policies]
     # rollouts for all latest_policies
     rollouts = [
         ExperienceBuffer(infos=[info])
@@ -72,7 +71,6 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
                     all_log_probs.append(None)
 
                 elif isinstance(policy, Policy):
-
                     dist = policy.get_action_distribution(obs)
                     action_indices = policy.sample_action(dist, deterministic=False)
                     log_probs = policy.log_prob(dist, action_indices).item()
