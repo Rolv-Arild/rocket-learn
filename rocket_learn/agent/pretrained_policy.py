@@ -2,11 +2,9 @@ from abc import ABC, abstractmethod
 from typing import Tuple
 from torch import nn
 
-from rocket_learn.agent.policy import Policy
 from rocket_learn.agent.discrete_policy import DiscretePolicy
 
 from rlgym.utils.gamestates import GameState
-
 
 class HardcodedAgent(ABC):
     """
@@ -38,7 +36,12 @@ class PretrainedDiscretePolicy(DiscretePolicy, HardcodedAgent):
 
         return actions
 
+
 class DemoDriveAgent(HardcodedAgent):
     def act(self, state: GameState):
-        return [2, 1, 0, 0, 0]
+        return [2, 1, 1, 0, 0, 0, 0, 0]
 
+
+class DemoKBMDriveAgent(HardcodedAgent):
+    def act(self, state: GameState):
+        return [2, 1, 0, 0, 0]
