@@ -27,6 +27,8 @@ class DiscretePolicy(Policy):
 
         logits = self(obs)
 
+        if isinstance(logits, th.Tensor):
+            logits = (logits,)
         max_shape = max(self.shape)
         logits = th.stack(
             [
@@ -52,7 +54,7 @@ class DiscretePolicy(Policy):
         return action_indices
 
     def log_prob(self, distribution: Categorical, selected_action):
-        log_prob = distribution.log_prob(selected_action.squeeze(dim=-1)).sum(dim=-1)
+        log_prob = distribution.log_prob(selected_action).sum(dim=-1)
         return log_prob
 
     def entropy(self, distribution: Categorical, selected_action):
