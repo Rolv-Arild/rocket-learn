@@ -29,15 +29,17 @@ class DiscretePolicy(Policy):
 
         if isinstance(logits, th.Tensor):
             logits = (logits,)
+
         max_shape = max(self.shape)
-        logits = th.stack(
+        logits = th.cat(
             [
                 l
                 if l.shape[-1] == max_shape
                 else F.pad(l, pad=(0, max_shape - l.shape[-1]), value=float("-inf"))
                 for l in logits
-            ]
-        ).swapdims(0, 1).squeeze(dim=2)
+            ],
+            dim=1
+        )
 
         return Categorical(logits=logits)
 
@@ -63,5 +65,5 @@ class DiscretePolicy(Policy):
 
     def env_compatible(self, action):
         if isinstance(action, th.Tensor):
-            action = action.numpy().squeeze()
+            action = action.numpy()
         return action
