@@ -227,7 +227,7 @@ class PPO:
                 transposed = tuple(zip(*buffer.observations))
                 obs_tensor = tuple(torch.from_numpy(np.vstack(t)).float() for t in transposed)
             else:
-                obs_tensor = th.from_numpy(np.stack(buffer.observations)).float()
+                obs_tensor = th.from_numpy(np.vstack(buffer.observations)).float()
 
             with th.no_grad():
                 if isinstance(obs_tensor, tuple):

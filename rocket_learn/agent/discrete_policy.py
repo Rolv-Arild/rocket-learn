@@ -31,7 +31,7 @@ class DiscretePolicy(Policy):
             logits = (logits,)
 
         max_shape = max(self.shape)
-        logits = th.cat(
+        logits = th.stack(
             [
                 l
                 if l.shape[-1] == max_shape
@@ -49,11 +49,11 @@ class DiscretePolicy(Policy):
             deterministic=False
     ):
         if deterministic:
-            action_indices = th.argmax(distribution.logits)
+            action_indices = th.argmax(distribution.logits, dim=-1)
         else:
             action_indices = distribution.sample()
 
-        return action_indices
+        return action_indices.squeeze()
 
     def log_prob(self, distribution: Categorical, selected_action):
         log_prob = distribution.log_prob(selected_action).sum(dim=-1)
