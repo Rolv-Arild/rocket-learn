@@ -27,6 +27,9 @@ class DiscretePolicy(Policy):
 
         logits = self(obs)
 
+        if isinstance(logits, th.Tensor):
+            logits = (logits,)
+
         max_shape = max(self.shape)
         logits = th.stack(
             [
@@ -34,8 +37,9 @@ class DiscretePolicy(Policy):
                 if l.shape[-1] == max_shape
                 else F.pad(l, pad=(0, max_shape - l.shape[-1]), value=float("-inf"))
                 for l in logits
-            ]
-        ).swapdims(0, 1).squeeze(dim=2)
+            ],
+            dim=1
+        )
 
         return Categorical(logits=logits)
 
@@ -45,14 +49,14 @@ class DiscretePolicy(Policy):
             deterministic=False
     ):
         if deterministic:
-            action_indices = th.argmax(distribution.logits)
+            action_indices = th.argmax(distribution.logits, dim=-1)
         else:
             action_indices = distribution.sample()
 
-        return action_indices
+        return action_indices.squeeze()
 
     def log_prob(self, distribution: Categorical, selected_action):
-        log_prob = distribution.log_prob(selected_action.squeeze(dim=-1)).sum(dim=-1)
+        log_prob = distribution.log_prob(selected_action).sum(dim=-1)
         return log_prob
 
     def entropy(self, distribution: Categorical, selected_action):
@@ -61,5 +65,5 @@ class DiscretePolicy(Policy):
 
     def env_compatible(self, action):
         if isinstance(action, th.Tensor):
-            action = action.numpy().squeeze()
+            action = action.numpy()
         return action
