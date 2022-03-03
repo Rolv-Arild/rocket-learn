@@ -624,6 +624,7 @@ class RedisHumanRolloutWorker:
         self.uuid = str(uuid4())
         self.redis.rpush(WORKER_IDS, self.uuid)
 
+        self.display_only = False
         if not self.display_only:
             print("Started worker", self.uuid, "on host", self.redis.connection_pool.connection_kwargs.get("host"),
                   "under name", name)  # TODO log instead
@@ -669,9 +670,13 @@ class RedisHumanRolloutWorker:
 
 
             n_new = self.n_agents - 1
+            versions = ['na']
+
             agents = [self.human]
             for n in range(n_new):
                 agents.append(self.current_agent)
+                versions.append(-1)
+
 
             versions = [v if v != -1 else latest_version for v in versions]
 

@@ -52,8 +52,7 @@ class DemoKBMDriveAgent(HardcodedAgent):
 
 class HumanAgent(HardcodedAgent):
     def __init__(self):
-        pygame.joystick.init()
-        pygame.joystick.get_count()
+        pygame.init()
 
         self.joystick = None
         if pygame.joystick.get_count() > 0:
@@ -70,7 +69,7 @@ class HumanAgent(HardcodedAgent):
     #act[7] = handbrake  # {0, 1} discrete
 
     def controller_actions(self, state):
-        player = [p for p in state.players if p.team == 0][0]
+        player = [p for p in state.players if p.team_num == 0][0]
         # allow controller to activate
         pygame.event.pump()
 
@@ -94,13 +93,13 @@ class HumanAgent(HardcodedAgent):
         yaw = steer
 
         roll = 1
-        roll_button = joystick.get_button(4)
+        roll_button = self.joystick.get_button(4)
         if roll_button:
             roll = steer
 
-        jump = joystick.get_button(0)
-        boost = joystick.get_button(1)
-        handbrake = joystick.get_button(2)
+        jump = self.joystick.get_button(0)
+        boost = self.joystick.get_button(1)
+        handbrake = self.joystick.get_button(2)
 
         print("jump: " + str(jump))
         print("boost: " + str(boost))
@@ -110,7 +109,7 @@ class HumanAgent(HardcodedAgent):
 
 
     def kbm_actions(self, state):
-        player = [p for p in state.players if p.team == 0][0]
+        player = [p for p in state.players if p.team_num == 0][0]
 
         throttle = 1
         if keyboard.is_pressed('w'):
@@ -145,7 +144,7 @@ class HumanAgent(HardcodedAgent):
         return [throttle, steer, pitch, yaw, roll, jump, boost, handbrake]
 
     def act(self, state: GameState):
-        actions = self.controller_actions()
-        actions = self.kbm_actions()
+        actions = self.controller_actions(state)
+        actions = self.kbm_actions(state)
 
         return actions
