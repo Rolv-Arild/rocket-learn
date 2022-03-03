@@ -52,7 +52,7 @@ def generate_episode(env: Gym, policies: List[Policy], evaluate=False) -> (List[
 
             for policy, obs in zip(policies, observations):
                 dist = policy.get_action_distribution(obs)
-                action_indices = policy.sample_action(dist, deterministic=False)
+                action_indices = policy.sample_action(dist, deterministic=False)[0]
                 log_probs = policy.log_prob(dist, action_indices).item()
                 actions = policy.env_compatible(action_indices)
 

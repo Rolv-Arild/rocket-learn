@@ -53,7 +53,7 @@ class DiscretePolicy(Policy):
         else:
             action_indices = distribution.sample()
 
-        return action_indices.squeeze()
+        return action_indices
 
     def log_prob(self, distribution: Categorical, selected_action):
         log_prob = distribution.log_prob(selected_action).sum(dim=-1)
