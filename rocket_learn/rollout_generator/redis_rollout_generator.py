@@ -397,7 +397,7 @@ class RedisRolloutWorker:
 
     def __init__(self, redis: Redis, name: str, match: Match,
                  past_version_prob=.2, evaluation_prob=0.01, sigma_target=1,
-                 display_only=False, send_gamestates=True, pretrained_agents=None):
+                 streamer_mode=False, send_gamestates=True, pretrained_agents=None, human_agent=None):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -408,7 +408,13 @@ class RedisRolloutWorker:
             self.pretrained_agents = pretrained_agents
             self.pretrained_total_prob = sum([self.pretrained_agents[key] for key in self.pretrained_agents])
 
-        self.display_only = display_only
+        self.human_agent = human_agent
+
+        if human_agent and pretrained_agents:
+            print("** WARNING - Human Player and Pretrain Agents are in conflict. **")
+            print("**           Pretrained Agents will be ignored.                **")
+
+        self.streamer_mode = streamer_mode
 
         self.current_agent = _unserialize_model(self.redis.get(MODEL_LATEST))
         self.past_version_prob = past_version_prob
@@ -420,7 +426,7 @@ class RedisRolloutWorker:
         self.uuid = str(uuid4())
         self.redis.rpush(WORKER_IDS, self.uuid)
 
-        if not self.display_only:
+        if not self.streamer_mode:
             print("Started worker", self.uuid, "on host", self.redis.connection_pool.connection_kwargs.get("host"),
                   "under name", name)  # TODO log instead
         else:
@@ -517,42 +523,54 @@ class RedisRolloutWorker:
                 self.current_agent = updated_agent
 
             n += 1
-
-            # TODO customizable past agent selection, should team only be same agent?
             pretrained_choice = None
-            n_old = 0
-            if self.n_agents > 1:
-                r = np.random.random()
-                rand_choice = (r - self.evaluation_prob) / (1 - self.evaluation_prob)
 
-                if r < self.evaluation_prob:
-                    n_old = self.n_agents
-                elif rand_choice < self.past_version_prob:
-                    n_old = np.random.randint(low=1, high=self.n_agents)
-                elif rand_choice < (self.past_version_prob + self.pretrained_total_prob):
-                    wheel_prob = self.past_version_prob
-                    for agent in self.pretrained_agents:
-                        wheel_prob += self.pretrained_agents[agent]
-                        if rand_choice < wheel_prob:
-                            pretrained_choice = agent
-                            n_old = np.random.randint(low=1, high=self.n_agents)
-                            break
+            if self.human_agent:
+                n_new = self.n_agents - 1
+                versions = ['na']
 
-            n_new = self.n_agents - n_old
-            versions = self._get_opponent_indices(n_new, n_old, pretrained_choice)
-            agents = []
-            for version in versions:
-                if version == -1:
+                agents = [self.human_agent]
+                for n in range(n_new):
                     agents.append(self.current_agent)
-                elif pretrained_choice is not None and version == 'na':
-                    agents.append(pretrained_choice)
-                else:
-                    selected_agent = self._get_past_model(version)
-                    agents.append(selected_agent)
-            versions = [v if v != -1 else latest_version for v in versions]
+                    versions.append(-1)
+
+                versions = [v if v != -1 else latest_version for v in versions]
+            else:
+                # TODO customizable past agent selection, should team only be same agent?
+                n_old = 0
+                if self.n_agents > 1:
+                    r = np.random.random()
+                    rand_choice = (r - self.evaluation_prob) / (1 - self.evaluation_prob)
+
+                    if r < self.evaluation_prob:
+                        n_old = self.n_agents
+                    elif rand_choice < self.past_version_prob:
+                        n_old = np.random.randint(low=1, high=self.n_agents)
+                    elif rand_choice < (self.past_version_prob + self.pretrained_total_prob):
+                        wheel_prob = self.past_version_prob
+                        for agent in self.pretrained_agents:
+                            wheel_prob += self.pretrained_agents[agent]
+                            if rand_choice < wheel_prob:
+                                pretrained_choice = agent
+                                n_old = np.random.randint(low=1, high=self.n_agents)
+                                break
+
+                n_new = self.n_agents - n_old
+                versions = self._get_opponent_indices(n_new, n_old, pretrained_choice)
+                agents = []
+                for version in versions:
+                    if version == -1:
+                        agents.append(self.current_agent)
+                    elif pretrained_choice is not None and version == 'na':
+                        agents.append(pretrained_choice)
+                    else:
+                        selected_agent = self._get_past_model(version)
+                        agents.append(selected_agent)
+                versions = [v if v != -1 else latest_version for v in versions]
 
             encode = self.send_gamestates
-            if all(isinstance(v, int) for v in versions) and all(v >= 0 for v in versions) and not self.display_only:
+            if all(isinstance(v, int) for v in versions) and all(v >= 0 for v in versions) \
+                    and not self.streamer_mode and self.human_agent is None:
                 print("Running evaluation game with versions:", versions)
                 result = util.generate_episode(self.env, agents, evaluate=True)
                 rollouts = []
@@ -563,10 +581,12 @@ class RedisRolloutWorker:
                 for v in versions:
                     if pretrained_choice is not None and v == 'na':  # print name but don't send it back
                         version_info.append(str(type(pretrained_choice).__name__))
+                    elif v == 'na':
+                        version_info.append('Human_player')
                     else:
                         version_info.append(str(v))
 
-                if not self.display_only:
+                if not self.streamer_mode:
                     print("Generating rollout with versions:", version_info)
 
                 rollouts, result = util.generate_episode(self.env, agents, evaluate=False)
@@ -580,132 +600,10 @@ class RedisRolloutWorker:
                 if result != 0:
                     post_stats += f", goal speed: {goal_speed:.2f} kph"
 
-                if not self.display_only:
+                if not self.streamer_mode:
                     print(post_stats)
 
-            if not self.display_only:
-                rollout_data = encode_buffers(rollouts, strict=encode)  # TODO change
-                # sanity_check = decode_buffers(rollout_data, encode,
-                #                               lambda: self.match._obs_builder,
-                #                               lambda: self.match._reward_fn,
-                #                               lambda: self.match._action_parser)
-                rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result,
-                                            encode))
-                # while True:
-                t.join()
-
-                def send():
-                    n_items = self.redis.rpush(ROLLOUTS, rollout_bytes)
-                    if n_items >= 1000:
-                        print("Had to limit rollouts. Learner may have have crashed, or is overloaded")
-                        self.redis.ltrim(ROLLOUTS, -100, -1)
-
-                t = Thread(target=send)
-                t.start()
-                time.sleep(0.01)
-
-
-
-class RedisHumanRolloutWorker:
-    """
-    Provides RedisRolloutGenerator with rollouts via a Redis server
-    """
-
-    def __init__(self, redis: Redis, name: str, match: Match, human):
-        # TODO model or config+params so workers can recreate just from redis connection?
-        self.redis = redis
-        self.name = name
-
-        self.human = human
-
-        self.current_agent = _unserialize_model(self.redis.get(MODEL_LATEST))
-
-        # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
-        self.uuid = str(uuid4())
-        self.redis.rpush(WORKER_IDS, self.uuid)
-
-        self.display_only = False
-        if not self.display_only:
-            print("Started worker", self.uuid, "on host", self.redis.connection_pool.connection_kwargs.get("host"),
-                  "under name", name)  # TODO log instead
-        else:
-            print("Streaming mode set. Running silent.")
-
-        self.match = match
-        self.env = Gym(match=self.match, pipe_id=os.getpid(), launch_preference=LaunchPreference.EPIC_LOGIN_TRICK,
-                       use_injector=True)
-        self.n_agents = self.match.agents
-
-    def run(self):  # Mimics Thread
-        """
-        begin processing in already launched match and push to redis
-        """
-        n = 0
-        latest_version = None
-        t = Thread()
-        t.start()
-        while True:
-            # Get the most recent version available
-            available_version = self.redis.get(VERSION_LATEST)
-            if available_version is None:
-                time.sleep(1)
-                continue  # Wait for version to be published (not sure if this is necessary?)
-            available_version = int(available_version)
-
-            # Only try to download latest version when new
-            if latest_version != available_version:
-                model_bytes = self.redis.get(MODEL_LATEST)
-                if model_bytes is None:
-                    time.sleep(1)
-                    continue  # This is maybe not necessary? Can't hurt to leave it in.
-                latest_version = available_version
-                updated_agent = _unserialize_model(model_bytes)
-                self.current_agent = updated_agent
-
-            n += 1
-
-            # TODO customizable past agent selection, should team only be same agent?
-            pretrained_choice = None
-            n_old = 0
-
-
-            n_new = self.n_agents - 1
-            versions = ['na']
-
-            agents = [self.human]
-            for n in range(n_new):
-                agents.append(self.current_agent)
-                versions.append(-1)
-
-
-            versions = [v if v != -1 else latest_version for v in versions]
-
-            version_info = []
-            for v in versions:
-                if pretrained_choice is not None and v == 'na':  # print name but don't send it back
-                    version_info.append(str(type(pretrained_choice).__name__))
-                else:
-                    version_info.append(str(v))
-
-            if not self.display_only:
-                print("Generating rollout with versions:", version_info)
-
-            rollouts, result = util.generate_episode(self.env, agents, evaluate=False)
-            if len(rollouts[0].observations) <= 1:
-                rollouts, result = util.generate_episode(self.env, agents, evaluate=False)
-
-            state = rollouts[0].infos[-2]["state"]
-            goal_speed = np.linalg.norm(state.ball.linear_velocity) * 0.036  # kph
-            str_result = ('+' if result > 0 else "") + str(result)
-            post_stats = f"Rollout finished after {len(rollouts[0].observations)} steps, result was {str_result}"
-            if result != 0:
-                post_stats += f", goal speed: {goal_speed:.2f} kph"
-
-            if not self.display_only:
-                print(post_stats)
-
-            if not self.display_only:
-                encode = self.send_gamestates
+            if not self.streamer_mode:
                 rollout_data = encode_buffers(rollouts, strict=encode)  # TODO change
                 # sanity_check = decode_buffers(rollout_data, encode,
                 #                               lambda: self.match._obs_builder,
