@@ -382,7 +382,8 @@ class RedisRolloutWorker:
 
     def __init__(self, redis: Redis, name: str, match: Match,
                  current_version_prob=.8, evaluation_prob=0.01, sigma_target=1,
-                 display_only=False, send_gamestates=True, jit_compile=False):
+                 display_only=False, send_gamestates=True, jit_compile=False,
+                 deterministic_old_prob=0.5):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -395,6 +396,7 @@ class RedisRolloutWorker:
         self.sigma_target = sigma_target
         self.send_gamestates = send_gamestates
         self.jit_compile = jit_compile
+        self.deterministic_old_prob = deterministic_old_prob
 
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.uuid = str(uuid4())
@@ -507,6 +509,8 @@ class RedisRolloutWorker:
                     agents.append(self.current_agent)
                 else:
                     selected_agent = self._get_past_model(version)
+                    if np.random.random() < self.deterministic_old_prob:
+                        selected_agent.deterministic = True
                     agents.append(selected_agent)
             versions = [v if v != -1 else latest_version for v in versions]
 

@@ -10,8 +10,8 @@ from rocket_learn.agent.policy import Policy
 
 
 class DiscretePolicy(Policy):
-    def __init__(self, net: nn.Module, shape: Tuple[int, ...] = (3,) * 5 + (2,) * 3):
-        super().__init__()
+    def __init__(self, net: nn.Module, shape: Tuple[int, ...] = (3,) * 5 + (2,) * 3, deterministic=False):
+        super().__init__(deterministic)
         self.net = net
         self.shape = shape
 
@@ -46,8 +46,10 @@ class DiscretePolicy(Policy):
     def sample_action(
             self,
             distribution: Categorical,
-            deterministic=False
+            deterministic=None
     ):
+        if deterministic is None:
+            deterministic = self.deterministic
         if deterministic:
             action_indices = th.argmax(distribution.logits, dim=-1)
         else:
