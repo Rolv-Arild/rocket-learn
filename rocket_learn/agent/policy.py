@@ -3,6 +3,10 @@ from abc import ABC, abstractmethod
 from torch import nn
 
 class Policy(nn.Module, ABC):
+    def __init__(self, deterministic=False):
+        super().__init__()
+        self.deterministic = deterministic
+
     @abstractmethod
     def forward(self, *args, **kwargs): raise NotImplementedError
 
@@ -11,7 +15,7 @@ class Policy(nn.Module, ABC):
 
     @staticmethod
     @abstractmethod
-    def sample_action(distribution, deterministic=False): raise NotImplementedError
+    def sample_action(distribution, deterministic=None): raise NotImplementedError
 
     @staticmethod
     @abstractmethod

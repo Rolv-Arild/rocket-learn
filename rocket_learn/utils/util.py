@@ -72,7 +72,7 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
 
                 elif isinstance(policy, Policy):
                     dist = policy.get_action_distribution(obs)
-                    action_indices = policy.sample_action(dist, deterministic=False)
+                    action_indices = policy.sample_action(dist, deterministic=False) #[0]
                     log_probs = policy.log_prob(dist, action_indices).item()
                     actions = policy.env_compatible(action_indices)
 
