@@ -516,6 +516,8 @@ class RedisRolloutWorker:
 
             encode = self.send_gamestates
             if all(v >= 0 for v in versions) and not self.display_only:
+                for agent in agents:
+                    agent.deterministic = False  # maybe True instead?
                 print("Running evaluation game with versions:", versions)
                 result = util.generate_episode(self.env, agents, evaluate=True)
                 rollouts = []
