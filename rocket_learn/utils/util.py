@@ -47,6 +47,7 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
 
     with torch.no_grad():
         while True:
+            step_action = []
             all_indices = []
             all_actions = []
             all_log_probs = []
@@ -72,12 +73,12 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
 
                 elif isinstance(policy, Policy):
                     dist = policy.get_action_distribution(obs)
-                    action_indices = policy.sample_action(dist, deterministic=False) #[0]
+                    action_indices = policy.sample_action(dist, deterministic=False)[0]
                     log_probs = policy.log_prob(dist, action_indices).item()
                     actions = policy.env_compatible(action_indices)
 
                     if actions.size != 8:
-                        if actions.size == 1:
+                        if actions.shape == 0:
                             actions = np.expand_dims(actions, axis=0)
 
                         # to allow different action spaces, pad out short ones (assume later unpadding in parser)
