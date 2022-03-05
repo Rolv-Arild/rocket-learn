@@ -76,6 +76,13 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
                     log_probs = policy.log_prob(dist, action_indices).item()
                     actions = policy.env_compatible(action_indices)
 
+                    if actions.size != 8:
+                        if actions.size == 1:
+                            actions = np.expand_dims(actions, axis=0)
+
+                        # to allow different action spaces, pad out short ones (assume later unpadding in parser)
+                        actions = np.pad(actions.astype('float64'), (0,8-actions.size), 'constant', constant_values=np.NAN)
+
                     all_indices.append(action_indices.numpy())
                     all_actions.append(actions)
                     all_log_probs.append(log_probs)
@@ -83,6 +90,7 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
                 else:
                     print(str(type(policy)) + " type use not defined")
                     assert False
+
 
             all_actions = np.vstack(all_actions)
             old_obs = observations
