@@ -398,7 +398,7 @@ class RedisRolloutWorker:
     def __init__(self, redis: Redis, name: str, match: Match,
                  past_version_prob=.2, evaluation_prob=0.01, sigma_target=1,
                  streamer_mode=False, send_gamestates=True, pretrained_agents=None, human_agent=None,
-                 jit_compile=False, deterministic_old_prob=0.5):
+                 deterministic_old_prob=0.5):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -422,7 +422,6 @@ class RedisRolloutWorker:
         self.evaluation_prob = evaluation_prob
         self.sigma_target = sigma_target
         self.send_gamestates = send_gamestates
-        self.jit_compile = jit_compile
         self.deterministic_old_prob = deterministic_old_prob
 
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
