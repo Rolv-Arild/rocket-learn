@@ -251,9 +251,8 @@ class PPO:
             returns = advantages + values
 
             obs_tensors.append(obs_tensor)
-            act_tensors.append(th.squeeze(th.from_numpy(actions)))
+            act_tensors.append(th.from_numpy(actions))
             log_prob_tensors.append(th.from_numpy(log_probs))
-            # advantage_tensors.append(advantages)
             returns_tensors.append(th.from_numpy(returns))
             rewards_tensors.append(th.from_numpy(rewards))
 

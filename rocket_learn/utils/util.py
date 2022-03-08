@@ -47,7 +47,6 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
 
     with torch.no_grad():
         while True:
-            step_action = []
             all_indices = []
             all_actions = []
             all_log_probs = []
@@ -91,7 +90,6 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
                 else:
                     print(str(type(policy)) + " type use not defined")
                     assert False
-
 
             all_actions = np.vstack(all_actions)
             old_obs = observations
