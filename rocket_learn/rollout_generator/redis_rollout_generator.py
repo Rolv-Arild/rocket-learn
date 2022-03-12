@@ -333,9 +333,9 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         # Set quality
         ratings = [Rating(*_unserialize(v)) for v in self.redis.lrange(QUALITIES, 0, -1)]
         if ratings:
-            quality = Rating(ratings[-1].mu, min(2 * ratings[-1].sigma, SIGMA))
+            quality = Rating(ratings[-1].mu, SIGMA)
         else:
-            quality = Rating(0, 1)  # First (typically random) agent is initialized at 0
+            quality = Rating(0, 1)  # First (basically random) agent is initialized at 0
         self.redis.rpush(QUALITIES, _serialize(tuple(quality)))
 
     def update_parameters(self, new_params):
