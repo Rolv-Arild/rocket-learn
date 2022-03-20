@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 
 from torch import nn
 
-
 class Policy(nn.Module, ABC):
     def __init__(self, deterministic=False):
         super().__init__()

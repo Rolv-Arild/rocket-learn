@@ -94,7 +94,8 @@ def encode_buffers(buffers: List[ExperienceBuffer], strict=False, send_rewards=T
         ]
 
 
-def decode_buffers(enc_buffers, encoded, obs_build_factory=None, rew_func_factory=None, act_parse_factory=None):
+def decode_buffers(enc_buffers, versions, encoded, obs_build_factory=None, rew_func_factory=None,
+                   act_parse_factory=None):
     if encoded:
         if len(enc_buffers) == 3:
             game_states, actions, log_probs = enc_buffers
@@ -140,10 +141,18 @@ def decode_buffers(enc_buffers, encoded, obs_build_factory=None, rew_func_factor
         obss = [obs_builder.build_obs(p, game_states[0], np.zeros(8))
                 for i, p in enumerate(game_states[0].players)]
         for s, gs in enumerate(game_states[1:]):
+            assert len(gs.players) == len(versions)
             final = s == len(game_states) - 2
             old_obs = obss
             obss = []
-            for i, player in enumerate(gs.players):
+            i = 0
+            for version in versions:
+                if version == 'na':
+                    continue  # don't want to rebuild or use prebuilt agents
+                player = gs.players[i]
+
+                # IF ONLY 1 buffer is returned, need a way to say to discard bad version
+
                 obs = obs_builder.build_obs(player, gs, env_actions[s][i])
                 if rewards is None:
                     if final:
@@ -154,6 +163,7 @@ def decode_buffers(enc_buffers, encoded, obs_build_factory=None, rew_func_factor
                     rew = rewards[i][s]
                 buffers[i].add_step(old_obs[i], actions[i][s], rew, final, log_probs[i][s], {"state": gs})
                 obss.append(obs)
+            i += 1
 
         return buffers
     else:
@@ -202,22 +212,27 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.rew_func_factory = rew_func_factory
         self.act_parse_factory = act_parse_factory
         self.mmr_min_episode_length = mmr_min_episode_length
+        self.pretrained_agents = {}
 
     @staticmethod
     def _process_rollout(rollout_bytes, latest_version, obs_build_func, rew_build_func, act_build_func):
         rollout_data, versions, uuid, name, result, encoded = _unserialize(rollout_bytes)
 
-        if any(version < 0 and abs(version - latest_version) > 1 for version in versions):
+        v_check = [v for v in versions if isinstance(v, int)]
+
+        if any(version < 0 and abs(version - latest_version) > 1 for version in v_check):
             return
 
-        buffers = decode_buffers(rollout_data, encoded, obs_build_func, rew_build_func, act_build_func)
+        buffers = decode_buffers(rollout_data, versions, encoded, obs_build_func, rew_build_func, act_build_func)
         return buffers, versions, uuid, name, result
 
     def _update_ratings(self, name, versions, buffers, latest_version, result):
         ratings = []
         relevant_buffers = []
         for version, buffer in itertools.zip_longest(versions, buffers):
-            if version < 0:
+            if version == 'na':
+                continue  # no need to rate pretrained agents
+            elif version < 0:
                 if abs(version - latest_version) <= 1:
                     relevant_buffers.append(buffer)
                     self.contributors[name] += buffer.size()
@@ -381,28 +396,39 @@ class RedisRolloutWorker:
     """
 
     def __init__(self, redis: Redis, name: str, match: Match,
-                 current_version_prob=.8, evaluation_prob=0.01, sigma_target=1,
-                 display_only=False, send_gamestates=True, jit_compile=False,
+                 past_version_prob=.2, evaluation_prob=0.01, sigma_target=1,
+                 streamer_mode=False, send_gamestates=True, pretrained_agents=None, human_agent=None,
                  deterministic_old_prob=0.5):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
 
-        self.display_only = display_only
+        self.pretrained_agents = {}
+        self.pretrained_total_prob = 0
+        if pretrained_agents is not None:
+            self.pretrained_agents = pretrained_agents
+            self.pretrained_total_prob = sum([self.pretrained_agents[key] for key in self.pretrained_agents])
+
+        self.human_agent = human_agent
+
+        if human_agent and pretrained_agents:
+            print("** WARNING - Human Player and Pretrain Agents are in conflict. **")
+            print("**           Pretrained Agents will be ignored.                **")
+
+        self.streamer_mode = streamer_mode
 
         self.current_agent = _unserialize_model(self.redis.get(MODEL_LATEST))
-        self.current_version_prob = current_version_prob
+        self.past_version_prob = past_version_prob
         self.evaluation_prob = evaluation_prob
         self.sigma_target = sigma_target
         self.send_gamestates = send_gamestates
-        self.jit_compile = jit_compile
         self.deterministic_old_prob = deterministic_old_prob
 
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.uuid = str(uuid4())
         self.redis.rpush(WORKER_IDS, self.uuid)
 
-        if not self.display_only:
+        if not self.streamer_mode:
             print("Started worker", self.uuid, "on host", self.redis.connection_pool.connection_kwargs.get("host"),
                   "under name", name)  # TODO log instead
         else:
@@ -413,7 +439,7 @@ class RedisRolloutWorker:
                        use_injector=True)
         self.n_agents = self.match.agents
 
-    def _get_opponent_indices(self, n_new, n_old):
+    def _get_opponent_indices(self, n_new, n_old, pretrained_choice):
         if n_old == 0:
             return [-1] * n_new
         # Get qualities
@@ -425,11 +451,18 @@ class RedisRolloutWorker:
             s = probs.sum()
             if s == 0:
                 n_new = np.random.randint(1, n_old)
-                return self._get_opponent_indices(n_new, n_old - n_new)
+                return self._get_opponent_indices(n_new, n_old - n_new, pretrained_choice)
             probs /= s
             versions = [np.random.choice(len(ratings), p=probs)]
             target_rating = ratings[versions[0]]
             n_old -= 1
+        elif pretrained_choice != None:  # pretrained agent chosen, just need index generation
+            matchups = np.full((n_new + n_old), -1).tolist()
+            for i in range(n_old):
+                index = np.random.randint(0, n_new + n_old)
+                matchups[index] = 'na'
+            return matchups
+
         else:
             versions = [-1] * n_new
             target_rating = ratings[-1]
@@ -462,6 +495,7 @@ class RedisRolloutWorker:
 
     @functools.lru_cache(maxsize=8)
     def _get_past_model(self, version):
+        assert isinstance(version, int)
         return _unserialize_model(self.redis.lindex(OPPONENT_MODELS, version))
 
     def run(self):  # Mimics Thread
@@ -491,41 +525,73 @@ class RedisRolloutWorker:
                 self.current_agent = updated_agent
 
             n += 1
+            pretrained_choice = None
 
-            # TODO customizable past agent selection, should team only be same agent?
-            n_old = 0
-            if self.n_agents > 1:
-                r = np.random.random()
-                if r < self.evaluation_prob:
-                    n_old = self.n_agents
-                elif (r - self.evaluation_prob) / (1 - self.evaluation_prob) > self.current_version_prob:
-                    n_old = np.random.randint(low=1, high=self.n_agents)
+            if self.human_agent:
+                n_new = self.n_agents - 1
+                versions = ['na']
 
-            n_new = self.n_agents - n_old
-            versions = self._get_opponent_indices(n_new, n_old)
-            agents = []
-            for version in versions:
-                if version == -1:
+                agents = [self.human_agent]
+                for n in range(n_new):
                     agents.append(self.current_agent)
-                else:
-                    selected_agent = self._get_past_model(version)
-                    if np.random.random() < self.deterministic_old_prob:
-                        selected_agent.deterministic = True
-                    agents.append(selected_agent)
-            versions = [v if v != -1 else latest_version for v in versions]
+                    versions.append(-1)
+
+                versions = [v if v != -1 else latest_version for v in versions]
+            else:
+                # TODO customizable past agent selection, should team only be same agent?
+                n_old = 0
+                if self.n_agents > 1:
+                    r = np.random.random()
+                    rand_choice = (r - self.evaluation_prob) / (1 - self.evaluation_prob)
+
+                    if r < self.evaluation_prob:
+                        n_old = self.n_agents
+                    elif rand_choice < self.past_version_prob:
+                        n_old = np.random.randint(low=1, high=self.n_agents)
+                    elif rand_choice < (self.past_version_prob + self.pretrained_total_prob):
+                        wheel_prob = self.past_version_prob
+                        for agent in self.pretrained_agents:
+                            wheel_prob += self.pretrained_agents[agent]
+                            if rand_choice < wheel_prob:
+                                pretrained_choice = agent
+                                n_old = np.random.randint(low=1, high=self.n_agents)
+                                break
+
+                n_new = self.n_agents - n_old
+                versions = self._get_opponent_indices(n_new, n_old, pretrained_choice)
+                agents = []
+                for version in versions:
+                    if version == -1:
+                        agents.append(self.current_agent)
+                    elif pretrained_choice is not None and version == 'na':
+                        agents.append(pretrained_choice)
+                    else:
+                        selected_agent = self._get_past_model(version)
+                        if np.random.random() < self.deterministic_old_prob:
+                            selected_agent.deterministic = True
+                        agents.append(selected_agent)
+                versions = [v if v != -1 else latest_version for v in versions]
 
             encode = self.send_gamestates
-            if all(v >= 0 for v in versions) and not self.display_only:
-                for agent in agents:
-                    agent.deterministic = False  # maybe True instead?
+            if all(isinstance(v, int) for v in versions) and all(v >= 0 for v in versions) \
+                    and not self.streamer_mode and self.human_agent is None:
                 print("Running evaluation game with versions:", versions)
                 result = util.generate_episode(self.env, agents, evaluate=True)
                 rollouts = []
                 print("Evaluation finished, goal differential:", result)
                 encode = False
             else:
-                if not self.display_only:
-                    print("Generating rollout with versions:", versions)
+                version_info = []
+                for v in versions:
+                    if pretrained_choice is not None and v == 'na':  # print name but don't send it back
+                        version_info.append(str(type(pretrained_choice).__name__))
+                    elif v == 'na':
+                        version_info.append('Human_player')
+                    else:
+                        version_info.append(str(v))
+
+                if not self.streamer_mode:
+                    print("Generating rollout with versions:", version_info)
 
                 rollouts, result = util.generate_episode(self.env, agents, evaluate=False)
                 if len(rollouts[0].observations) <= 1:
@@ -538,10 +604,10 @@ class RedisRolloutWorker:
                 if result != 0:
                     post_stats += f", goal speed: {goal_speed:.2f} kph"
 
-                if not self.display_only:
+                if not self.streamer_mode:
                     print(post_stats)
 
-            if not self.display_only:
+            if not self.streamer_mode:
                 rollout_data = encode_buffers(rollouts, strict=encode)  # TODO change
                 # sanity_check = decode_buffers(rollout_data, encode,
                 #                               lambda: self.match._obs_builder,
