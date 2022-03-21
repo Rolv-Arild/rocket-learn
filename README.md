@@ -1,27 +1,57 @@
 # rocket-learn
-RLGym training tool
 
-## TODO
-- Add logging (✔ wandb only)
-  - Give both PPO and RolloutGenerator access ✔
-  - Also normal logging instead of prints
-- Add reward normalization (and distribution?)
-- Centralize RewardFunction ✔
-- Transfer model to CPU before storing
-- Model freedom
-  - Multiple inputs ✔ (when obs is tuple it batches them one by one)
-  - Allow shared layers
-  - Recurrent?
-  - Continuous actions if we really want
-- Redis features 
-  - Saving and loading ✔ (could be more streamlined though)
-  - Full setup (architecture, params, config?) communicated via redis, can start worker with only IP (may not be feasible)
-  - Version quality is most important measurement, need to log it ✔
-  - Implement quality update ✔
-- Long-term plan is to set up a stream and let (at least some) people contribute with rollouts
-  - Keep track of who is contributing ✔, make on-screen leaderboards
-  - Exact setup in [different repo](https://github.com/Rolv-Arild/Necto)
-  - Rolv can keep it running on current PC, planning to get new one
-  - Need to come to agreement on config (architecture, reward func, parameters etc.)
-- Known issues
-  - Sometimes very short episodes appear (<10 frames), seemingly without any reason
+## What is rocket-learn?
+
+rocket-learn is a machine learning framework specifically designed for Rocket League Reinforcement Learning. 
+It works in conjunction with Rocket League, RLGym, and Bakkesmod.
+
+## What features does rocket-learn have?
+
+<ul>
+<li>Reinforcement learning algorithm available out of the box</li>
+  <ul>
+    <li>Proximal Policy Optimization (PPO)</li>
+    <li>extensible format allows new algorithms to be added</li>
+  </ul>
+<li>Distributed compute from multiple computers</li>
+<li>Automatic saving of and training against previous agent versions</li>
+<li>Trueskill progress tracking</li>
+<li>Training against Hardcoded/Pretrained Agents</li>
+<li>Training against Humans</li>
+<li>Saving and loading models</li>
+<li>wandb logging</li>
+</ul>
+
+
+## Should I use rocket-learn?
+
+You should use Stable Baselines3 (SB3) to make your bot at first. The hardest parts of building a 
+machine learning bot are 
+
+- understanding how to program
+- understanding how machine learning works
+- choosing good hyperparameters
+- choosing good reward functions
+- choosing an action parser
+- making a statesetter that puts the bot in the best situations
+
+SB3 is a great way to figure out those essential parts. Once you have all of those aspects down, rocket-learn
+may be a good next step to a better machine learning bot. 
+
+If you *don't* yet have these, rocket-learn will add a large amount of complexity for no added benefit. It's 
+important to remember that high compute and a tough opponent are less important than good fundamentals of ML.
+
+## How do I setup rocket-learn?
+
+1) Get [Redis](https://docs.servicestack.net/install-redis-windows) running 
+
+*__Improper Redis setup can leave your computer extremely vulnerable to Bad Guys. 
+We are not responsible for your computer's safety. We assume you know what you are doing.__*
+
+2) Clone the repo
+
+```
+git clone https://github.com/Rolv-Arild/rocket-learn.git
+```
+
+3) Look at the examples to get up and running

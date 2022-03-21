@@ -30,9 +30,9 @@ class PretrainedDiscretePolicy(DiscretePolicy, HardcodedAgent):
 
     def act(self, state: GameState):
         obs = self.obs_builder_func(state)
-        dist = policy.get_action_distribution(obs)
-        action_indices = policy.sample_action(dist, deterministic=False)
-        actions = policy.env_compatible(action_indices)
+        dist = self.get_action_distribution(obs)
+        action_indices = self.sample_action(dist, deterministic=False)
+        actions = self.env_compatible(action_indices)
 
         return actions
 
