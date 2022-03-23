@@ -30,7 +30,7 @@ class ExpandAdvancedObs(AdvancedObs):
 if __name__ == "__main__":
     wandb.login(key=os.environ["WANDB_KEY"])
     logger = wandb.init(project="demo", entity="example_entity")
-    logger.name = "DEFAULT_LEARNER_EXAMPLE"
+    logger.name = "LOADING_RUN_EXAMPLE"
 
     redis = Redis(password="you_better_use_a_password")
 
@@ -44,7 +44,7 @@ if __name__ == "__main__":
     def act():
         return DiscreteAction()
 
-    # SPECIFIES HOW OFTEN OLD VERSIONS ARE SAVED TO REDIS
+
     rollout_gen = RedisRolloutGenerator(redis, obs, rew, act,
                                         logger=logger, save_every=50000)
 
@@ -71,5 +71,7 @@ if __name__ == "__main__":
         logger=logger,
     )
 
-    #SPECIFIES HOW OFTEN CHECKPOINTS ARE SAVED
+    # LOAD A CHECKPOINT THAT WAS PREVIOUSLY SAVED AND CONTINUE TRAINING. OPTIONAL PARAMETER ALLOWS YOU
+    # TO RESTART THE STEP COUNT INSTEAD OF CONTINUING
+    alg.load("path\\from\\below\\checkpoint.pt")
     alg.run(iterations_per_save=10, save_dir="checkpoint_save_directory")

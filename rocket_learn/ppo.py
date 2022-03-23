@@ -26,12 +26,16 @@ class PPO:
         :param agent: An ActorCriticAgent
         :param n_steps: The number of steps to run per update
         :param gamma: Discount factor
-        :param batch_size: Minibatch size
+        :param batch_size: batch size to break experience data into for training
         :param epochs: Number of epoch when optimizing the loss
-        :param clip_range: Clipping parameter for the value function
+        :param minibatch_size: size to break batch sets into (helps combat VRAM issues)
+        :param clip_range: PPO Clipping parameter for the value function
         :param ent_coef: Entropy coefficient for the loss calculation
         :param gae_lambda: Factor for trade-off of bias vs variance for Generalized Advantage Estimator
         :param vf_coef: Value function coefficient for the loss calculation
+        :param max_grad_norm: optional clip_grad_norm value
+        :param logger: wandb logger to store run results
+        :param device: torch device
     """
 
     def __init__(
