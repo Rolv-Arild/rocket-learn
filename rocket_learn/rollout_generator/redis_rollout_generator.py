@@ -217,12 +217,12 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.max_age = max_age
 
     @staticmethod
-    def _process_rollout(rollout_bytes, latest_version, obs_build_func, rew_build_func, act_build_func):
+    def _process_rollout(rollout_bytes, latest_version, obs_build_func, rew_build_func, act_build_func, max_age):
         rollout_data, versions, uuid, name, result, encoded = _unserialize(rollout_bytes)
 
         v_check = [v for v in versions if isinstance(v, int)]
 
-        if any(version < 0 and abs(version - latest_version) > self.max_age for version in v_check):
+        if any(version < 0 and abs(version - latest_version) > max_age for version in v_check):
             return
 
         buffers = decode_buffers(rollout_data, versions, encoded, obs_build_func, rew_build_func, act_build_func)
@@ -272,7 +272,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             self.tot_bytes += len(data)
             res = self._process_rollout(
                 data, latest_version,
-                self.obs_build_func, self.rew_func_factory, self.act_parse_factory
+                self.obs_build_func, self.rew_func_factory, self.act_parse_factory,
+                self.max_age
             )
             if res is not None:
                 buffers, versions, uuid, name, result = res
