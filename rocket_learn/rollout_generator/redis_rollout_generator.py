@@ -438,7 +438,7 @@ class RedisRolloutWorker:
             print("Streaming mode set. Running silent.")
 
         self.match = match
-        self.env = Gym(match=self.match, pipe_id=os.getpid(), launch_preference=LaunchPreference.EPIC_LOGIN_TRICK,
+        self.env = Gym(match=self.match, pipe_id=os.getpid(), launch_preference=LaunchPreference.EPIC,
                        use_injector=True)
         self.n_agents = self.match.agents
 
