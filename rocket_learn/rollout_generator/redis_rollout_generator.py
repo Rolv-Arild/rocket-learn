@@ -191,7 +191,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             save_every=10,
             logger=None,
             clear=True,
-            mmr_min_episode_length=150
+            mmr_min_episode_length=150,
+            max_age=0
     ):
         self.tot_bytes = 0
         self.redis = redis
@@ -213,6 +214,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.act_parse_factory = act_parse_factory
         self.mmr_min_episode_length = mmr_min_episode_length
         self.pretrained_agents = {}
+        self.max_age = max_age
 
     @staticmethod
     def _process_rollout(rollout_bytes, latest_version, obs_build_func, rew_build_func, act_build_func):
@@ -220,7 +222,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
 
         v_check = [v for v in versions if isinstance(v, int)]
 
-        if any(version < 0 and abs(version - latest_version) > 1 for version in v_check):
+        if any(version < 0 and abs(version - latest_version) > self.max_age for version in v_check):
             return
 
         buffers = decode_buffers(rollout_data, versions, encoded, obs_build_func, rew_build_func, act_build_func)
@@ -233,7 +235,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             if version == 'na':
                 continue  # no need to rate pretrained agents
             elif version < 0:
-                if abs(version - latest_version) <= 1:
+                if abs(version - latest_version) <= self.max_age:
                     relevant_buffers.append(buffer)
                     self.contributors[name] += buffer.size()
                 else:
