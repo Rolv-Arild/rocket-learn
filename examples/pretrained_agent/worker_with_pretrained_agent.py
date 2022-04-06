@@ -12,7 +12,9 @@ from rlgym.utils.obs_builders.advanced_obs import AdvancedObs
 from rlgym.utils.action_parsers.discrete_act import DiscreteAction
 
 from rocket_learn.rollout_generator.redis_rollout_generator import RedisRolloutWorker
-from rocket_learn.agent.pretrained_policy import DemoDriveAgent
+from rocket_learn.agent.pretrained_policy import HardcodedAgent
+
+from rocket_learn.agent.pretrained_agents.necto.necto_v1 import NectoV1
 
 # rocket-learn always expects a batch dimension in the built observation
 class ExpandAdvancedObs(AdvancedObs):
@@ -37,11 +39,24 @@ Important things to note:
 
 """
 
+
+# NEW HARDCODED AGENTS MUST IMPLEMENT THE act() METHOD, WHICH RETURNS AN ARRAY OF ACTIONS USED TO
+# CONTROL THE AGENT
+class DemoCustomAgent(HardcodedAgent):
+    def act(self, state: GameState):
+        return [2, 1, 1, 0, 0, 0, 0, 0]
+
+
+
+
 if __name__ == "__main__":
+
+    team_size = 1
+
     match = Match(
         game_speed=100,
         self_play=True,
-        team_size=1,
+        team_size=team_size,
         state_setter=DefaultState(),
         obs_builder=ExpandAdvancedObs(),
         action_parser=DiscreteAction(),
@@ -52,11 +67,17 @@ if __name__ == "__main__":
 
     # TODO: add in pretrained example
 
-    demo_agent = DemoDriveAgent()
-    #demo_rl_agent = PretrainedDiscretePolicy(obs=TotallyDifferentObs, net=)
+    # ROCKET-LEARN PRETRAINED AGENTS ARE GIVEN THEIR OBSERVATION BUILDER AND POLICY NET
+    loaded_net = None
 
-    #agents and their probability of occurrence
-    pretrained_agents = {demo_agent: .4} #, demo_rl_agent: .4}
+    # AT THE MOMENT, THIS IS THE ONLY VERSION OF NECTO AVAILABLE
+    model_name = "necto-model.pt"
+    nectov1 = NectoV1(model_string=model_name, n_players=team_size*2)
+
+    demo_hardcoded_agent = DemoCustomAgent()
+
+    #EACH AGENT AND THEIR PROBABILITY OF OCCURRENCE
+    pretrained_agents = {demo_hardcoded_agent: .05, nectov1: .9}
 
     r = Redis(host="127.0.0.1", password="you_better_use_a_password")
     RedisRolloutWorker(r, "examplePretrainedWorker", match, pretrained_agents=pretrained_agents, past_version_prob=.05).run()

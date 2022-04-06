@@ -28,8 +28,8 @@ Allows the worker to run a human player, letting the AI play against and learn f
 Important things to note:
 
 -The human will always be blue due to RLGym camera constraints
--Attempting to run a human trainer and pretrained agents will cause the pretrained agents to be ignored. They will
-never show up.
+-Attempting to run a human trainer and pretrained agents will cause the pretrained agents to be ignored. 
+    They will never show up.
 
 """
 

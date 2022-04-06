@@ -55,9 +55,10 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
             if not isinstance(observations, list):
                 observations = [observations]
 
+            index = 0
             for policy, obs in zip(policies, observations):
                 if isinstance(policy, HardcodedAgent):
-                    actions = policy.act(last_state)
+                    actions = policy.act(last_state, index)
 
                     #make sure output is in correct format
                     if not isinstance(observations, np.ndarray):
@@ -90,6 +91,8 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
                 else:
                     print(str(type(policy)) + " type use not defined")
                     assert False
+
+                index += 1
 
             all_actions = np.vstack(all_actions)
             old_obs = observations

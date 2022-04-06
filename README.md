@@ -54,4 +54,10 @@ We are not responsible for your computer's safety. We assume you know what you a
 git clone https://github.com/Rolv-Arild/rocket-learn.git
 ```
 
-3) Look at the examples to get up and running
+3) Start up, in order:
+
+- the Redis server
+- the Learner
+- the Workers
+
+Look at the examples to get up and running

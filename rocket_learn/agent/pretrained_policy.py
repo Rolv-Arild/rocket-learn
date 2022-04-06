@@ -6,13 +6,14 @@ from rocket_learn.agent.discrete_policy import DiscretePolicy
 
 from rlgym.utils.gamestates import GameState
 
+
 class HardcodedAgent(ABC):
     """
         An external bot prebuilt and imported to be trained against
     """
 
     @abstractmethod
-    def act(self, state: GameState): raise NotImplementedError
+    def act(self, state: GameState, player_index: int): raise NotImplementedError
 
 
 class PretrainedDiscretePolicy(DiscretePolicy, HardcodedAgent):
@@ -28,7 +29,7 @@ class PretrainedDiscretePolicy(DiscretePolicy, HardcodedAgent):
         super().__init__(net, shape)
         self.obs_builder_func = obs_builder_func
 
-    def act(self, state: GameState):
+    def act(self, state: GameState, player_index):
         obs = self.obs_builder_func(state)
         dist = self.get_action_distribution(obs)
         action_indices = self.sample_action(dist, deterministic=False)
@@ -38,11 +39,10 @@ class PretrainedDiscretePolicy(DiscretePolicy, HardcodedAgent):
 
 
 class DemoDriveAgent(HardcodedAgent):
-    def act(self, state: GameState):
+    def act(self, state: GameState, player_index: int):
         return [2, 1, 1, 0, 0, 0, 0, 0]
 
 
 class DemoKBMDriveAgent(HardcodedAgent):
-    def act(self, state: GameState):
+    def act(self, state: GameState, player_index: int):
         return [2, 1, 0, 0, 0]
-
