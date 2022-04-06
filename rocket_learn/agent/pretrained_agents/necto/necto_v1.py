@@ -17,9 +17,8 @@ class NectoV1(HardcodedAgent):
         self.actor = torch.jit.load(os.path.join(cur_dir, model_string))
         self.obs_builder = NectoV1Obs(n_players=n_players)
         self.previous_action = np.array([0, 0, 0, 0, 0, 0, 0, 0])
-        print(self.previous_action.shape)
 
-    def act(self, state: GameState, player_index:int):
+    def act(self, state: GameState, player_index: int):
         player = state.players[player_index]
         teammates = [p for p in state.players if p.team_num == player.team_num and p != player]
         opponents = [p for p in state.players if p.team_num != player.team_num]

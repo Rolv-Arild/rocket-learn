@@ -600,6 +600,10 @@ class RedisRolloutWorker:
                 if len(rollouts[0].observations) <= 1:
                     rollouts, result = util.generate_episode(self.env, agents, evaluate=False)
 
+                if len(rollouts[0].observations) <= 1:
+                    print(" ** Rollout Generation Error: Restarting Generation ** ")
+                    continue
+
                 state = rollouts[0].infos[-2]["state"]
                 goal_speed = np.linalg.norm(state.ball.linear_velocity) * 0.036  # kph
                 str_result = ('+' if result > 0 else "") + str(result)
