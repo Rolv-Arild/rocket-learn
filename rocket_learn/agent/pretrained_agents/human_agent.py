@@ -85,7 +85,7 @@ class HumanAgent(HardcodedAgent):
 
         return [throttle, steer, pitch, yaw, roll, jump, boost, handbrake]
 
-    def act(self, state: GameState):
+    def act(self, state: GameState, player_index: int):
         if self.joystick:
             actions = self.controller_actions(state)
         else:
