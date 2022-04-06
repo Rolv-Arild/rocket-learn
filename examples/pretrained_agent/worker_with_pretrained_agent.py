@@ -65,10 +65,6 @@ if __name__ == "__main__":
         reward_function=DefaultReward()
     )
 
-    # TODO: add in pretrained example
-
-    # ROCKET-LEARN PRETRAINED AGENTS ARE GIVEN THEIR OBSERVATION BUILDER AND POLICY NET
-    loaded_net = None
 
     # AT THE MOMENT, THIS IS THE ONLY VERSION OF NECTO AVAILABLE
     model_name = "necto-model.pt"
@@ -77,7 +73,7 @@ if __name__ == "__main__":
     demo_hardcoded_agent = DemoCustomAgent()
 
     #EACH AGENT AND THEIR PROBABILITY OF OCCURRENCE
-    pretrained_agents = {demo_hardcoded_agent: .05, nectov1: .9}
+    pretrained_agents = {demo_hardcoded_agent: .05, nectov1: .05}
 
     r = Redis(host="127.0.0.1", password="you_better_use_a_password")
     RedisRolloutWorker(r, "examplePretrainedWorker", match, pretrained_agents=pretrained_agents, past_version_prob=.05).run()
