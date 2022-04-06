@@ -106,6 +106,11 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
             rewards = [r for i, r in enumerate(rewards) if latest_policy_indices[i] == 1]
             all_log_probs = [r for i, r in enumerate(all_log_probs) if latest_policy_indices[i] == 1]
 
+            assert len(old_obs) == len(all_indices), str(len(old_obs)) + " obs, " + str(len(all_indices)) + " ind"
+            assert len(old_obs) == len(rewards), str(len(old_obs)) + " obs, " + str(len(rewards)) + " ind"
+            assert len(old_obs) == len(all_log_probs), str(len(old_obs)) + " obs, " + str(len(all_log_probs)) + " ind"
+            assert len(old_obs) == len(rollouts), str(len(old_obs)) + " obs, " + str(len(rollouts)) + " ind"
+
             # Might be different if only one agent?
             for exp_buf, obs, act, rew, log_prob in zip(rollouts, old_obs, all_indices, rewards, all_log_probs):
                 exp_buf.add_step(obs, act, rew, done, log_prob, info)
