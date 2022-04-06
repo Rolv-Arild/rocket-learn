@@ -43,7 +43,7 @@ Important things to note:
 # NEW HARDCODED AGENTS MUST IMPLEMENT THE act() METHOD, WHICH RETURNS AN ARRAY OF ACTIONS USED TO
 # CONTROL THE AGENT
 class DemoCustomAgent(HardcodedAgent):
-    def act(self, state: GameState):
+    def act(self, state: GameState, player_index: int):
         return [2, 1, 1, 0, 0, 0, 0, 0]
 
 
