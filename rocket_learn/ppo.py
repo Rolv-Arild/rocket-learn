@@ -88,6 +88,7 @@ class PPO:
         self.logger = logger
         self.logger.watch((self.agent.actor, self.agent.critic))
         self.timer = time.time_ns() // 1_000_000
+        self.jit_tracer = None
 
     def update_reward_norm(self, rewards: np.ndarray) -> np.ndarray:
         batch_mean = np.mean(rewards)
@@ -421,3 +422,6 @@ class PPO:
             'optimizer_state_dict': self.agent.optimizer.state_dict(),
             # TODO save/load reward normalization mean, std, count
         }, version_dir + "\\checkpoint.pt")
+
+        if save_actor_jit:
+            torch.save(th.jit.trace(self.agent.actor, self.jit_tracer),  version_dir + "\\policy.jit")
