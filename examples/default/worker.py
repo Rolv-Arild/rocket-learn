@@ -14,7 +14,7 @@ from rlgym.utils.action_parsers.discrete_act import DiscreteAction
 from rocket_learn.rollout_generator.redis_rollout_generator import RedisRolloutWorker
 
 
-# rocket-learn always expects a batch dimension in the built observation
+# ROCKET-LEARN ALWAYS EXPECTS A BATCH DIMENSION IN THE BUILT OBSERVATION
 class ExpandAdvancedObs(AdvancedObs):
     def build_obs(self, player: PlayerData, state: GameState, previous_action: numpy.ndarray) -> Any:
         obs = super(ExpandAdvancedObs, self).build_obs(player, state, previous_action)
@@ -22,6 +22,15 @@ class ExpandAdvancedObs(AdvancedObs):
 
 
 if __name__ == "__main__":
+    """
+
+    Starts up a rocket-learn worker process, which plays out a game, sends back game data to the 
+    learner, and receives updated model parameters when available
+
+    """
+
+    # BUILD THE ROCKET LEAGUE MATCH THAT WILL USED FOR TRAINING
+    # -ENSURE OBSERVATION, REWARD, AND ACTION CHOICES ARE THE SAME IN THE WORKER
     match = Match(
         game_speed=100,
         self_play=True,
@@ -34,5 +43,11 @@ if __name__ == "__main__":
         reward_function=DefaultReward()
     )
 
+    # LINK TO THE REDIS SERVER YOU SHOULD HAVE RUNNING (USE THE SAME PASSWORD YOU SET IN THE REDIS
+    # CONFIG)
     r = Redis(host="127.0.0.1", password="you_better_use_a_password")
+
+
+    # LAUNCH ROCKET LEAGUE AND BEGIN TRAINING
+    # -past_version_prob SPECIFIES HOW OFTEN OLD VERSIONS WILL BE RANDOMLY SELECTED AND TRAINED AGAINST
     RedisRolloutWorker(r, "example", match, past_version_prob=.05).run()

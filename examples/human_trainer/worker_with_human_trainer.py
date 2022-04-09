@@ -15,7 +15,7 @@ from rocket_learn.rollout_generator.redis_rollout_generator import RedisRolloutW
 from rocket_learn.agent.pretrained_agents.human_agent import HumanAgent
 
 
-# rocket-learn always expects a batch dimension in the built observation
+# ROCKET-LEARN ALWAYS EXPECTS A BATCH DIMENSION IN THE BUILT OBSERVATION
 class ExpandAdvancedObs(AdvancedObs):
     def build_obs(self, player: PlayerData, state: GameState, previous_action: numpy.ndarray) -> Any:
         obs = super(ExpandAdvancedObs, self).build_obs(player, state, previous_action)
@@ -46,7 +46,14 @@ if __name__ == "__main__":
         reward_function=DefaultReward()
     )
 
+    # ALLOW HUMAN CONTROL THROUGH MOUSE AND KEYBOARD OR A CONTROLLER IF ONE IS PLUGGED IN
+    # -CONTROL BINDINGS ARE CURRENTLY NOT CHANGEABLE
+    # -CONTROLLER SETUP CURRENTLY EXPECTS AN XBOX 360 CONTROLLER. OTHERS WILL WORK BUT PROBABLY NOT WELL
     human = HumanAgent()
 
     r = Redis(host="127.0.0.1", password="you_better_use_a_password")
+
+    # LAUNCH ROCKET LEAGUE AND BEGIN TRAINING
+    # -human_agent TELLS RLGYM THAT THE FIRST AGENT IS ALWAYS TO BE HUMAN CONTROLLED
+    # -past_version_prob SPECIFIES HOW OFTEN OLD VERSIONS WILL BE RANDOMLY SELECTED AND TRAINED AGAINST
     RedisRolloutWorker(r, "exampleHumanWorker", match, human_agent=human, past_version_prob=.05).run()
