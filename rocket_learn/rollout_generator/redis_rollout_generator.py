@@ -277,7 +277,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             )
             if res is not None:
                 buffers, versions, uuid, name, result = res
-                versions = [version for version in versions if version != 'na'] #don't track humans or hardcoded
+                versions = [version for version in versions if version != 'na']  # don't track humans or hardcoded
 
                 relevant_buffers = self._update_ratings(name, versions, buffers, latest_version, result)
                 yield from relevant_buffers
@@ -461,7 +461,7 @@ class RedisRolloutWorker:
             versions = [np.random.choice(len(ratings), p=probs)]
             target_rating = ratings[versions[0]]
             n_old -= 1
-        elif pretrained_choice != None:  # pretrained agent chosen, just need index generation
+        elif pretrained_choice is not None:  # pretrained agent chosen, just need index generation
             matchups = np.full((n_new + n_old), -1).tolist()
             for i in range(n_old):
                 index = np.random.randint(0, n_new + n_old)
@@ -478,11 +478,13 @@ class RedisRolloutWorker:
         # like for instance ratings of [100, 0] vs [100, 0], which is technically fair but not useful
         probs = np.zeros(len(ratings))
         for i, rating in enumerate(ratings):
+            if n_new == 0 and i == versions[0]:
+                continue  # Don't add more of the same agent in evaluation matches
             p = probability_NvsM([rating], [target_rating])
             probs[i] = (p * (1 - p)) ** (2 / (n_old + n_new))  # Be a little bit less strict the more players there are
         probs /= probs.sum()
 
-        old_versions = np.random.choice(len(probs), size=n_old, p=probs).tolist()
+        old_versions = np.random.choice(len(probs), size=n_old, p=probs, replace=n_new > 0).tolist()
         versions += old_versions
 
         # Then calculate the full matchup, with just permutations of the selected versions (weighted by fairness)
