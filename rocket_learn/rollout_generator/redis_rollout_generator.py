@@ -403,7 +403,7 @@ class RedisRolloutWorker:
     def __init__(self, redis: Redis, name: str, match: Match,
                  past_version_prob=.2, evaluation_prob=0.01, sigma_target=1,
                  streamer_mode=False, send_gamestates=True, pretrained_agents=None, human_agent=None,
-                 deterministic_old_prob=0.5):
+                 deterministic_old_prob=0.5, force_paging=False):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -441,7 +441,7 @@ class RedisRolloutWorker:
 
         self.match = match
         self.env = Gym(match=self.match, pipe_id=os.getpid(), launch_preference=LaunchPreference.EPIC,
-                       use_injector=True)
+                       use_injector=True, force_paging=force_paging)
         self.n_agents = self.match.agents
         self.total_steps_generated = 0
 
