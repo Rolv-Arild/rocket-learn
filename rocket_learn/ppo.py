@@ -352,7 +352,8 @@ class PPO:
 
                 loss.backward()
 
-                total_kl_div += th.mean((th.exp(ratio.detach().cpu()) - 1) - ratio.detach().cpu())
+                # Unbiased low variance KL div estimator from http://joschu.net/blog/kl-approx.html
+                total_kl_div += th.mean((ratio - 1) - (log_prob - old_log_prob)).item()
                 tot_loss += loss.item()
                 tot_policy_loss += policy_loss.item()
                 tot_entropy_loss += entropy_loss.item()
