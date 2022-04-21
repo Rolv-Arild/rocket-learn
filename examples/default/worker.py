@@ -27,7 +27,15 @@ if __name__ == "__main__":
     Starts up a rocket-learn worker process, which plays out a game, sends back game data to the 
     learner, and receives updated model parameters when available
 
-    """
+    """    
+    
+    
+    # OPTIONAL ADDITION:
+    # LIMIT TORCH THREADS TO 1 ON THE WORKERS TO LIMIT TOTAL RESOURCE USAGE
+    # TRY WITH AND WITHOUT FOR YOUR SPECIFIC HARDWARE
+    import torch
+    torch.set_num_threads(1)
+    
 
     # BUILD THE ROCKET LEAGUE MATCH THAT WILL USED FOR TRAINING
     # -ENSURE OBSERVATION, REWARD, AND ACTION CHOICES ARE THE SAME IN THE WORKER
@@ -50,4 +58,12 @@ if __name__ == "__main__":
 
     # LAUNCH ROCKET LEAGUE AND BEGIN TRAINING
     # -past_version_prob SPECIFIES HOW OFTEN OLD VERSIONS WILL BE RANDOMLY SELECTED AND TRAINED AGAINST
-    RedisRolloutWorker(r, "example", match, past_version_prob=.05).run()
+    RedisRolloutWorker(r, "example", match, 
+        past_version_prob=.2, 
+        evaluation_prob=0.01, 
+        sigma_target=1,
+        streamer_mode=False, 
+        send_gamestates=False, 
+        pretrained_agents=None, 
+        human_agent=None,
+        deterministic_old_prob=0.5).run()

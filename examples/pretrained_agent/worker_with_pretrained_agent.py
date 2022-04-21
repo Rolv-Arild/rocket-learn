@@ -79,5 +79,5 @@ if __name__ == "__main__":
 
     r = Redis(host="127.0.0.1", password="you_better_use_a_password")
 
-    
+
     RedisRolloutWorker(r, "examplePretrainedWorker", match, pretrained_agents=pretrained_agents, past_version_prob=.05).run()

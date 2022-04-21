@@ -46,7 +46,7 @@ if __name__ == "__main__":
 
 
     rollout_gen = RedisRolloutGenerator(redis, obs, rew, act,
-                                        logger=logger, save_every=50000)
+                                        logger=logger, save_every=100)
 
     critic = Sequential(Linear(107, 128), Linear(128, 64), Linear(64, 32), Linear(32, 1))
     actor = DiscretePolicy(
@@ -74,4 +74,9 @@ if __name__ == "__main__":
     # LOAD A CHECKPOINT THAT WAS PREVIOUSLY SAVED AND CONTINUE TRAINING. OPTIONAL PARAMETER ALLOWS YOU
     # TO RESTART THE STEP COUNT INSTEAD OF CONTINUING
     alg.load("path\\from\\below\\checkpoint.pt")
-    alg.run(iterations_per_save=10, save_dir="checkpoint_save_directory")
+    
+        # BEGIN TRAINING. IT WILL CONTINUE UNTIL MANUALLY STOPPED
+    # -iterations_per_save SPECIFIES HOW OFTEN CHECKPOINTS ARE SAVED
+    # -save_dir SPECIFIES WHERE
+    # -clear DELETE REDIS ENTRIES WHEN STARTING UP (SET TO FALSE TO CONTINUE WITH OLD AGENTS)
+    alg.run(iterations_per_save=100, save_dir="checkpoint_save_directory", clear=False)

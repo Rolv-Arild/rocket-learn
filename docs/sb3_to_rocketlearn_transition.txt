@@ -1,0 +1,6 @@
+SWITCHING FROM STABLE-BASELINES3 TO ROCKET-LEARN
+
+SB3 abstracts away several important parts of ML training that rocket-learn does not. 
+
+	-your rewards rewards will not be normalized
+	-your networks will not have orthogonal initialization by default (assuming you use PPO)

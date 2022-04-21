@@ -38,7 +38,7 @@ if __name__ == "__main__":
     # ROCKET-LEARN USES WANDB WHICH REQUIRES A LOGIN TO USE. YOU CAN SET AN ENVIRONMENTAL VARIABLE
     # OR HARDCODE IT IF YOU ARE NOT SHARING YOUR SOURCE FILES
     wandb.login(key=os.environ["WANDB_KEY"])
-    logger = wandb.init(project="demo", entity="example_entity")
+    logger = wandb.init(project="demo", entity="wandb_username")
     logger.name = "DEFAULT_LEARNER_EXAMPLE"
 
     # LINK TO THE REDIS SERVER YOU SHOULD HAVE RUNNING (USE THE SAME PASSWORD YOU SET IN THE REDIS
@@ -61,7 +61,7 @@ if __name__ == "__main__":
     # COMPARISON AND TRAINING AGAINST PREVIOUS VERSIONS
     rollout_gen = RedisRolloutGenerator(redis, obs, rew, act,
                                         logger=logger,
-                                        save_every=50000)
+                                        save_every=100)
 
     # ROCKET-LEARN EXPECTS A SET OF DISTRIBUTIONS FOR EACH ACTION FROM THE NETWORK, NOT
     # THE ACTIONS THEMSELVES. SEE network_setup.readme.txt FOR MORE INFORMATION
@@ -106,10 +106,17 @@ if __name__ == "__main__":
         minibatch_size=10_000,
         epochs=10,
         gamma=599 / 600,
+        clip_range=0.2,
+        ent_coef=0.01,
+        gae_lambda=0.95,
+        vf_coef=1,
+        max_grad_norm=0.5,
         logger=logger,
+        device="cuda",
     )
 
     # BEGIN TRAINING. IT WILL CONTINUE UNTIL MANUALLY STOPPED
     # -iterations_per_save SPECIFIES HOW OFTEN CHECKPOINTS ARE SAVED
     # -save_dir SPECIFIES WHERE
-    alg.run(iterations_per_save=10, save_dir="checkpoint_save_directory")
+    # -clear DELETE REDIS ENTRIES WHEN STARTING UP
+    alg.run(iterations_per_save=100, save_dir="checkpoint_save_directory", clear=True)
