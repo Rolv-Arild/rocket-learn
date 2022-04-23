@@ -59,9 +59,11 @@ if __name__ == "__main__":
     # THE ROLLOUT GENERATOR CAPTURES INCOMING DATA THROUGH REDIS AND PASSES IT TO THE LEARNER.
     # -save_every SPECIFIES HOW OFTEN OLD VERSIONS ARE SAVED TO REDIS. THESE ARE USED FOR TRUESKILL
     # COMPARISON AND TRAINING AGAINST PREVIOUS VERSIONS
+    # -clear DELETE REDIS ENTRIES WHEN STARTING UP (SET TO FALSE TO CONTINUE WITH OLD AGENTS)
     rollout_gen = RedisRolloutGenerator(redis, obs, rew, act,
                                         logger=logger,
-                                        save_every=100)
+                                        save_every=100,
+                                        clear=False)
 
     # ROCKET-LEARN EXPECTS A SET OF DISTRIBUTIONS FOR EACH ACTION FROM THE NETWORK, NOT
     # THE ACTIONS THEMSELVES. SEE network_setup.readme.txt FOR MORE INFORMATION
@@ -118,5 +120,4 @@ if __name__ == "__main__":
     # BEGIN TRAINING. IT WILL CONTINUE UNTIL MANUALLY STOPPED
     # -iterations_per_save SPECIFIES HOW OFTEN CHECKPOINTS ARE SAVED
     # -save_dir SPECIFIES WHERE
-    # -clear DELETE REDIS ENTRIES WHEN STARTING UP
-    alg.run(iterations_per_save=100, save_dir="checkpoint_save_directory", clear=True)
+    alg.run(iterations_per_save=100, save_dir="checkpoint_save_directory")
