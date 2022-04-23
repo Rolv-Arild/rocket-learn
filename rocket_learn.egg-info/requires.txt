@@ -1,0 +1,9 @@
+cloudpickle==1.6.0
+gym
+torch
+tqdm
+trueskill
+msgpack_numpy
+wandb
+pygame
+keyboard
