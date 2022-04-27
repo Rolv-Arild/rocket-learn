@@ -36,6 +36,10 @@ class PPO:
         :param max_grad_norm: optional clip_grad_norm value
         :param logger: wandb logger to store run results
         :param device: torch device
+        :param zero_grads_with_none: 0 gradient with None instead of 0
+
+        Look here for info on zero_grads_with_none
+        https://pytorch.org/docs/master/generated/torch.optim.Optimizer.zero_grad.html#torch.optim.Optimizer.zero_grad
     """
 
     def __init__(
@@ -55,6 +59,7 @@ class PPO:
             max_grad_norm=0.5,
             logger=None,
             device="cuda",
+            zero_grads_with_none=False,
     ):
         self.rollout_generator = rollout_generator
 
@@ -62,6 +67,7 @@ class PPO:
         # TODO move agent to rollout generator
         self.agent = agent.to(device)
         self.device = device
+        self.zero_grads_with_none = zero_grads_with_none
 
         self.starting_iteration = 0
 
@@ -89,6 +95,7 @@ class PPO:
         self.logger.watch((self.agent.actor, self.agent.critic))
         self.timer = time.time_ns() // 1_000_000
         self.jit_tracer = None
+
 
     def update_reward_norm(self, rewards: np.ndarray) -> np.ndarray:
         batch_mean = np.mean(rewards)
@@ -292,11 +299,14 @@ class PPO:
 
         n = 0
 
+        if self.jit_tracer is None:
+            self.jit_tracer = obs_tensor[0].to(self.device)
+
         print("Training network...")
 
         precompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
         t0 = time.perf_counter_ns()
-        self.agent.optimizer.zero_grad()
+        self.agent.optimizer.zero_grad(set_to_none=self.zero_grads_with_none)
         for e in range(self.epochs):
             # this is mostly pulled from sb3
 
@@ -367,7 +377,7 @@ class PPO:
                 clip_grad_norm_(self.agent.actor.parameters(), self.max_grad_norm)
 
             self.agent.optimizer.step()
-            self.agent.optimizer.zero_grad()
+            self.agent.optimizer.zero_grad(set_to_none=self.zero_grads_with_none)
 
         t1 = time.perf_counter_ns()
         postcompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
@@ -425,4 +435,5 @@ class PPO:
         }, version_dir + "\\checkpoint.pt")
 
         if save_actor_jit:
-            torch.save(th.jit.trace(self.agent.actor, self.jit_tracer),  version_dir + "\\policy.jit")
+            traced_actor = th.jit.trace(self.agent.actor, self.jit_tracer)
+            torch.jit.save(traced_actor,  version_dir + "\\jit_policy.jit")

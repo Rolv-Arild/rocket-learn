@@ -281,7 +281,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             )
             if res is not None:
                 buffers, versions, uuid, name, result = res
-                versions = [version for version in versions if version != 'na']  # don't track humans or hardcoded
+                #versions = [version for version in versions if version != 'na']  # don't track humans or hardcoded
 
                 relevant_buffers = self._update_ratings(name, versions, buffers, latest_version, result)
                 yield from relevant_buffers
