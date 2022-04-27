@@ -192,7 +192,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             logger=None,
             clear=True,
             mmr_min_episode_length=150,
-            max_age=0
+            max_age=0,
+            min_sigma=0
     ):
         self.tot_bytes = 0
         self.redis = redis
@@ -215,6 +216,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.mmr_min_episode_length = mmr_min_episode_length
         self.pretrained_agents = {}
         self.max_age = max_age
+        self.min_sigma = min_sigma
 
     @staticmethod
     def _process_rollout(rollout_bytes, latest_version, obs_build_func, rew_build_func, act_build_func, max_age):
@@ -259,8 +261,10 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                 ratings_versions.setdefault(version, []).append(rating)
 
             for version, ratings in ratings_versions.items():
-                avg_rating = Rating((sum(r.mu for r in ratings) / len(ratings)),
-                                    (sum(r.sigma ** 2 for r in ratings) ** 0.5 / len(ratings)))  # Average vars
+                # In case of duplicates, average ratings together (not strictly necessary with default setup)
+                # Also limit sigma to its lower bound
+                avg_rating = Rating(sum(r.mu for r in ratings) / len(ratings),
+                                    max(sum(r.sigma ** 2 for r in ratings) ** 0.5 / len(ratings), self.min_sigma))
                 self.redis.lset(QUALITIES, version, _serialize(tuple(avg_rating)))
 
         return relevant_buffers
@@ -455,10 +459,10 @@ class RedisRolloutWorker:
             sigmas = np.array([r.sigma for r in ratings])
             probs = np.clip(sigmas - self.sigma_target, a_min=0, a_max=None)
             s = probs.sum()
-            if s == 0:
-                n_new = np.random.randint(1, n_old)
-                return self._get_opponent_indices(n_new, n_old - n_new, pretrained_choice)
-            probs /= s
+            if s == 0 or np.random.normal(0, 1) > self.sigma_target:
+                probs = np.ones_like(probs) / len(probs)
+            else:
+                probs /= s
             versions = [np.random.choice(len(ratings), p=probs)]
             target_rating = ratings[versions[0]]
             n_old -= 1
