@@ -406,7 +406,7 @@ class RedisRolloutWorker:
 
     def __init__(self, redis: Redis, name: str, match: Match,
                  past_version_prob=.2, evaluation_prob=0.01, sigma_target=1,
-                 streamer_mode=False, send_gamestates=True, pretrained_agents=None, human_agent=None,
+                 streamer_mode=False, deterministic_streamer=False,send_gamestates=True, pretrained_agents=None, human_agent=None,
                  deterministic_old_prob=0.5, force_paging=False):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
@@ -425,8 +425,11 @@ class RedisRolloutWorker:
             print("**           Pretrained Agents will be ignored.                **")
 
         self.streamer_mode = streamer_mode
+        self.deterministic_streamer = deterministic_streamer
 
         self.current_agent = _unserialize_model(self.redis.get(MODEL_LATEST))
+        if self.streamer_mode and self.deterministic_streamer:
+            self.current_agent.deterministic = True
         self.past_version_prob = past_version_prob
         self.evaluation_prob = evaluation_prob
         self.sigma_target = sigma_target
@@ -535,6 +538,8 @@ class RedisRolloutWorker:
                 latest_version = available_version
                 updated_agent = _unserialize_model(model_bytes)
                 self.current_agent = updated_agent
+                if self.streamer_mode and self.deterministic_streamer:
+                    self.current_agent.deterministic = True
 
             n += 1
             pretrained_choice = None
