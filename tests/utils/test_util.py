@@ -1,0 +1,113 @@
+from rlgym.utils.gamestates import GameState
+
+from rocket_learn.utils.util import encode_gamestate
+
+
+def test_encode_gamestate():
+    initial = [0,0,0]
+    boost_pad = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+    ball_state = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+    player_info = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+    player_car_state = [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
+    player_ternary = [5, 5, 5, 5, 5, 5, 5, 5, 5, 5]
+
+    state = []
+    state.extend(initial)
+    state.extend(boost_pad)
+    state.extend(ball_state)
+    state.extend(player_info)
+    state.extend(player_car_state)
+    state.extend(player_ternary)
+    assert encode_gamestate(GameState(state)) == [0,
+                                                  0,
+                                                  0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  1.0,
+                                                  2,
+                                                  2,
+                                                  2,
+                                                  2,
+                                                  2,
+                                                  2,
+                                                  2,
+                                                  2,
+                                                  2,
+                                                  2,
+                                                  2,
+                                                  2,
+                                                  2,
+                                                  2,
+                                                  2,
+                                                  2,
+                                                  2,
+                                                  2,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  3,
+                                                  True,
+                                                  True,
+                                                  True,
+                                                  True,
+                                                  4.0]

@@ -16,5 +16,5 @@ setup(
    url='https://github.com/Rolv-Arild/rocket-learn',
    packages=[package for package in find_packages() if package.startswith("rocket_learn")],
    long_description=long_description,
-   install_requires=['cloudpickle==1.6.0', 'gym', 'torch', 'tqdm', 'trueskill', 'msgpack_numpy', 'wandb', 'pygame', 'keyboard'],
+   install_requires=['cloudpickle==1.6.0', 'gym', 'torch', 'tqdm', 'trueskill', 'msgpack_numpy', 'wandb', 'pygame', 'keyboard', 'pytest'],
 )
