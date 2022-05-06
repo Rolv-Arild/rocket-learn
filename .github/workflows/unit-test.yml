@@ -17,7 +17,10 @@ jobs:
       - name: Install BakkesMod
         run: BakkesModSetup\BakkesModSetup.exe
       - name: Install dependencies
-        run: python setup.py install
+        run:  |
+          python setup.py install
+          pip install rlgym
+          pip install pytest
       - name: Run Test
         run: pytest
 
