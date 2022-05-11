@@ -15,7 +15,7 @@ jobs:
       - name: Unzip BakkesMod
         run: Expand-Archive -Path 'BakkesModSetup.zip' -DestinationPath 'BakkesModSetup'
       - name: Install BakkesMod
-        run: BakkesModSetup\BakkesModSetup.exe
+        run: BakkesModSetup\BakkesModSetup.exe /VERYSILENT /installfromdll=true
       - name: Install dependencies
         run:  |
           python setup.py install
