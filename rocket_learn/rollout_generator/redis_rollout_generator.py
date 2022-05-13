@@ -281,7 +281,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             )
             if res is not None:
                 buffers, versions, uuid, name, result = res
-                #versions = [version for version in versions if version != 'na']  # don't track humans or hardcoded
+                # versions = [version for version in versions if version != 'na']  # don't track humans or hardcoded
 
                 relevant_buffers = self._update_ratings(name, versions, buffers, latest_version, result)
                 yield from relevant_buffers
@@ -406,8 +406,9 @@ class RedisRolloutWorker:
 
     def __init__(self, redis: Redis, name: str, match: Match,
                  past_version_prob=.2, evaluation_prob=0.01, sigma_target=1,
-                 streamer_mode=False, deterministic_streamer=False,send_gamestates=True, pretrained_agents=None, human_agent=None,
-                 deterministic_old_prob=0.5, force_paging=False):
+                 streamer_mode=False, deterministic_streamer=False, send_gamestates=True, pretrained_agents=None,
+                 human_agent=None,
+                 deterministic_old_prob=0.5, force_paging=False, deterministic_evaluation=False):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -435,6 +436,7 @@ class RedisRolloutWorker:
         self.sigma_target = sigma_target
         self.send_gamestates = send_gamestates
         self.deterministic_old_prob = deterministic_old_prob
+        self.deterministic_evaluation = deterministic_evaluation
 
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.uuid = str(uuid4())
@@ -584,7 +586,8 @@ class RedisRolloutWorker:
                         agents.append(pretrained_choice)
                     else:
                         selected_agent = self._get_past_model(version)
-                        if np.random.random() < self.deterministic_old_prob:
+                        if np.random.random() < self.deterministic_old_prob \
+                                or n_new == 0 and self.deterministic_evaluation:
                             selected_agent.deterministic = True
                         agents.append(selected_agent)
                 versions = [v if v != -1 else latest_version for v in versions]
