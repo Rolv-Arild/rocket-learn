@@ -11,7 +11,7 @@ from rlgym.utils.state_setters.default_state import DefaultState
 from rlgym.utils.obs_builders.advanced_obs import AdvancedObs
 from rlgym.utils.action_parsers.discrete_act import DiscreteAction
 
-from rocket_learn.rollout_generator.redis_rollout_generator import RedisRolloutWorker
+from rocket_learn.rollout_generator.redis.redis_rollout_worker import RedisRolloutWorker
 from rocket_learn.agent.pretrained_agents.human_agent import HumanAgent
 
 

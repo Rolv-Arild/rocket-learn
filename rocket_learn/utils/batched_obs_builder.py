@@ -4,7 +4,7 @@ import numpy as np
 from rlgym.utils import ObsBuilder
 from rlgym.utils.gamestates import PlayerData, GameState
 
-from rocket_learn.utils.util import encode_gamestate
+from rocket_learn.utils.gamestate_encoding import encode_gamestate
 
 
 class BatchedObsBuilder(ObsBuilder):
@@ -29,16 +29,14 @@ class BatchedObsBuilder(ObsBuilder):
         self.current_obs = None
         self._reset(initial_state)
 
-    def build_obs(self, player: PlayerData, state: GameState, previous_action: np.ndarray) -> Any:
-        if self.current_state is None:
-            self.current_state = state
-            return np.zeros(0)  # Make Aech happy
+    def pre_step(self, state: GameState):
         if state != self.current_state:
             self.current_obs = self.batched_build_obs(
                 np.expand_dims(encode_gamestate(state), axis=0)
             )
             self.current_state = state
 
+    def build_obs(self, player: PlayerData, state: GameState, previous_action: np.ndarray) -> Any:
         for i, p in enumerate(state.players):
             if p == player:
                 self.add_actions(self.current_obs, previous_action, i)

@@ -96,7 +96,6 @@ class PPO:
         self.timer = time.time_ns() // 1_000_000
         self.jit_tracer = None
 
-
     def update_reward_norm(self, rewards: np.ndarray) -> np.ndarray:
         batch_mean = np.mean(rewards)
         batch_var = np.var(rewards)
@@ -167,7 +166,7 @@ class PPO:
 
             self.total_steps += self.n_steps  # size
             t1 = time.time()
-            self.logger.log({"fps": self.n_steps / (t1 - t0), "total_timesteps": self.total_steps})
+            self.logger.log({"ppo/fps": self.n_steps / (t1 - t0), "ppo/total_timesteps": self.total_steps})
 
             # pr.disable()
             # s = io.StringIO()
@@ -243,10 +242,22 @@ class PPO:
 
             with th.no_grad():
                 if isinstance(obs_tensor, tuple):
-                    x = tuple(o.to(self.device) for o in obs_tensor)
+                    try:
+                        x = tuple(o.to(self.device) for o in obs_tensor)
+                    except RuntimeError as e:
+                        print("RuntimeError in obs transfer", e)
+                        x = tuple(o.to(self.device) for o in obs_tensor)
                 else:
-                    x = obs_tensor.to(self.device)
-                values = self.agent.critic(x).detach().cpu().numpy().flatten()  # No batching?
+                    try:
+                        x = obs_tensor.to(self.device)
+                    except RuntimeError as e:
+                        print("RuntimeError in obs transfer", e)
+                        x = obs_tensor.to(self.device)
+                try:
+                    values = self.agent.critic(x).detach().cpu().numpy().flatten()  # No batching?
+                except RuntimeError as e:
+                    print("RuntimeError in critic 1", e)
+                    values = self.agent.critic(x).detach().cpu().numpy().flatten()  # No batching?
 
             actions = np.stack(buffer.actions)
             log_probs = np.stack(buffer.log_probs)
@@ -275,9 +286,9 @@ class PPO:
         ep_steps = np.array(ep_steps)
 
         self.logger.log({
-            "ep_reward_mean": ep_rewards.mean(),
-            "ep_reward_std": ep_rewards.std(),
-            "ep_len_mean": ep_steps.mean(),
+            "ppo/ep_reward_mean": ep_rewards.mean(),
+            "ppo/ep_reward_std": ep_rewards.std(),
+            "ppo/ep_len_mean": ep_steps.mean(),
         }, step=iteration, commit=False)
 
         if isinstance(obs_tensors[0], tuple):
@@ -335,10 +346,20 @@ class PPO:
                 old_log_prob = log_prob_batch[i: i + self.minibatch_size].to(self.device)
 
                 # TODO optimization: use forward_actor_critic instead of separate in case shared, also use GPU
-                log_prob, entropy = self.evaluate_actions(obs, act)  # Assuming obs and actions as input
+                try:
+                    log_prob, entropy = self.evaluate_actions(obs, act)  # Assuming obs and actions as input
+                except RuntimeError as e:
+                    print("RuntimeError in evaluate_actions", e)
+                    log_prob, entropy = self.evaluate_actions(obs, act)  # Assuming obs and actions as input
+
                 ratio = torch.exp(log_prob - old_log_prob)
 
-                values_pred = self.agent.critic(obs)
+                try:
+                    values_pred = self.agent.critic(obs)
+                except RuntimeError as e:
+                    print("RuntimeError in critic 2", e)
+                    values_pred = self.agent.critic(obs)
+
                 values_pred = th.squeeze(values_pred)
                 adv = ret - values_pred
                 adv = (adv - th.mean(adv)) / (th.std(adv) + 1e-8)
@@ -360,6 +381,27 @@ class PPO:
                 loss = ((policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss)
                         / (self.batch_size / self.minibatch_size))
 
+                if not torch.isfinite(loss).all():
+                    print("Non-finite loss, skipping", n)
+                    print("\tPolicy loss:", policy_loss)
+                    print("\tEntropy loss:", entropy_loss)
+                    print("\tValue loss:", value_loss)
+                    print("\tTotal loss:", loss)
+                    print("\tRatio:", ratio)
+                    print("\tAdv:", adv)
+                    print("\tLog prob:", log_prob)
+                    print("\tOld log prob:", old_log_prob)
+                    print("\tEntropy:", entropy)
+                    print("\tActor has inf:", any(not p.isfinite().all() for p in self.agent.actor.parameters()))
+                    print("\tCritic has inf:", any(not p.isfinite().all() for p in self.agent.critic.parameters()))
+                    print("\tReward as inf:", not np.isfinite(ep_rewards).all())
+                    if isinstance(obs, tuple):
+                        for j in range(len(obs)):
+                            print(f"\tObs[{j}] has inf:", not obs[j].isfinite().all())
+                    else:
+                        print("\tObs has inf:", not obs.isfinite().all())
+                    continue
+
                 loss.backward()
 
                 # Unbiased low variance KL div estimator from http://joschu.net/blog/kl-approx.html
@@ -380,17 +422,20 @@ class PPO:
             self.agent.optimizer.zero_grad(set_to_none=self.zero_grads_with_none)
 
         t1 = time.perf_counter_ns()
+
+        assert n > 0
+
         postcompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
 
         self.logger.log({
-            "loss": tot_loss / n,
-            "policy_loss": tot_policy_loss / n,
-            "entropy_loss": tot_entropy_loss / n,
-            "value_loss": tot_value_loss / n,
-            "mean_kl": total_kl_div / n,
-            "clip_fraction": tot_clipped / n,
-            "epoch_time": (t1 - t0) / (1e6 * self.epochs),
-            "update_magnitude": th.dist(precompute, postcompute, p=2),
+            "ppo/loss": tot_loss / n,
+            "ppo/policy_loss": tot_policy_loss / n,
+            "ppo/entropy_loss": tot_entropy_loss / n,
+            "ppo/value_loss": tot_value_loss / n,
+            "ppo/mean_kl": total_kl_div / n,
+            "ppo/clip_fraction": tot_clipped / n,
+            "ppo/epoch_time": (t1 - t0) / (1e6 * self.epochs),
+            "ppo/update_magnitude": th.dist(precompute, postcompute, p=2),
 
         }, step=iteration, commit=False)  # Is committed after when calculating fps
 
@@ -436,4 +481,4 @@ class PPO:
 
         if save_actor_jit:
             traced_actor = th.jit.trace(self.agent.actor, self.jit_tracer)
-            torch.jit.save(traced_actor,  version_dir + "\\jit_policy.jit")
+            torch.jit.save(traced_actor, version_dir + "\\jit_policy.jit")
