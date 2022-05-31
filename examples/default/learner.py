@@ -109,7 +109,6 @@ if __name__ == "__main__":
         epochs=10,
         gamma=599 / 600,
         clip_range=0.2,
-        ent_coef=0.01,
         gae_lambda=0.95,
         vf_coef=1,
         max_grad_norm=0.5,
