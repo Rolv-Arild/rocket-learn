@@ -27,8 +27,8 @@ class RedisRolloutWorker:
     def __init__(self, redis: Redis, name: str, match: Match,
                  past_version_prob=.2, evaluation_prob=0.01, sigma_target=2,
                  streamer_mode=False, send_gamestates=True, send_obs=True,
-                 pretrained_agents=None, human_agent=None, force_paging=False,
-                 auto_minimize=True):
+                 scoreboard=None, pretrained_agents=None, human_agent=None,
+                 force_paging=False, auto_minimize=True):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -64,6 +64,7 @@ class RedisRolloutWorker:
         else:
             print("Streaming mode set. Running silent.")
 
+        self.scoreboard = scoreboard
         state_setter = DynamicGMSetter(match._state_setter)  # noqa Rangler made me do it
         self.set_team_size = state_setter.set_team_size
         match._state_setter = state_setter
@@ -210,7 +211,8 @@ class RedisRolloutWorker:
             if not any(isinstance(v, int) and v < 0 for v in versions) \
                     and not self.streamer_mode and self.human_agent is None:
                 print("Running evaluation game with versions:", version_info)
-                result = rocket_learn.utils.generate_episode.generate_episode(self.env, agents, evaluate=True)
+                result = rocket_learn.utils.generate_episode.generate_episode(self.env, agents, evaluate=True,
+                                                                              scoreboard=self.scoreboard)
                 rollouts = []
                 print("Evaluation finished, goal differential:", result)
             else:
@@ -219,7 +221,8 @@ class RedisRolloutWorker:
 
                 try:
                     rollouts, result = rocket_learn.utils.generate_episode.generate_episode(self.env, agents,
-                                                                                            evaluate=False)
+                                                                                            evaluate=False,
+                                                                                            scoreboard=self.scoreboard)
 
                     if len(rollouts[0].observations) <= 1:  # Happens sometimes, unknown reason
                         print(" ** Rollout Generation Error: Restarting Generation ** ")

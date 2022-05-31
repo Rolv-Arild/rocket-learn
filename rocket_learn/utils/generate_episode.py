@@ -13,7 +13,7 @@ from rocket_learn.experience_buffer import ExperienceBuffer
 from rocket_learn.utils.dynamic_gamemode_setter import DynamicGMSetter
 
 
-def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuffer], int):
+def generate_episode(env: Gym, policies, evaluate=False, scoreboard=None) -> (List[ExperienceBuffer], int):
     """
     create experience buffer data by interacting with the environment(s)
     """
@@ -33,6 +33,9 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
 
         env._match._reward_fn = ConstantReward()  # noqa Save some cpu cycles
 
+    if scoreboard is not None:
+        random_resets = scoreboard.random_resets
+        scoreboard.random_resets = not evaluate
     observations, info = env.reset(return_info=True)
     result = 0
 
@@ -145,6 +148,9 @@ def generate_episode(env: Gym, policies, evaluate=False) -> (List[ExperienceBuff
                     observations, info = env.reset(return_info=True)
 
             last_state = info['state']
+
+    if scoreboard is not None:
+        scoreboard.random_resets = random_resets  # noqa Checked above
 
     if evaluate:
         if isinstance(env._match._state_setter, DynamicGMSetter):  # noqa
