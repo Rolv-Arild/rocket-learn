@@ -9,7 +9,6 @@ import numba
 import numpy as np
 import torch
 import torch as th
-import tqdm
 from torch.nn import functional as F
 from torch.nn.utils import clip_grad_norm_
 
@@ -145,7 +144,6 @@ class PPO:
             def _iter():
                 size = 0
                 print(f"Collecting rollouts ({iteration})...")
-                # progress = tqdm.tqdm(desc=f"Collecting rollouts ({iteration})", total=self.n_steps, position=0, leave=True)
                 while size < self.n_steps:
                     try:
                         rollout = next(rollout_gen)

@@ -13,7 +13,7 @@ from rlgym.gym import Gym
 
 import rocket_learn.utils.generate_episode
 from rocket_learn.rollout_generator.redis.utils import _unserialize_model, MODEL_LATEST, WORKER_IDS, OPPONENT_MODELS, \
-    VERSION_LATEST, _serialize, ROLLOUTS, encode_buffers, get_rating, LATEST_RATING_ID, \
+    VERSION_LATEST, _serialize, ROLLOUTS, encode_buffers, decode_buffers, get_rating, LATEST_RATING_ID, \
     EXPERIENCE_PER_MODE
 from rocket_learn.utils.util import probability_NvsM
 from rocket_learn.utils.dynamic_gamemode_setter import DynamicGMSetter
@@ -269,10 +269,14 @@ class RedisRolloutWorker:
                                               return_obs=self.send_obs,
                                               return_states=self.send_gamestates,
                                               return_rewards=True)
-                # sanity_check = decode_buffers(rollout_data, encode,
-                #                               lambda: self.match._obs_builder,
-                #                               lambda: self.match._reward_fn,
-                #                               lambda: self.match._action_parser)
+                #sanity_check = decode_buffers(enc_buffers=rollout_data,
+                #                                versions=versions,
+                #                                has_obs=False,
+                #                                has_states=True,
+                #                                has_rewards=True,
+                #                                obs_build_factory=lambda: self.match._obs_builder,
+                #                                act_parse_factory=lambda: self.match._action_parser)
+
                 rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result,
                                             self.send_obs, self.send_gamestates, True))
                 # while True:
