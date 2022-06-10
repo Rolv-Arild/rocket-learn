@@ -344,10 +344,15 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                 name="sigma",
                 showlegend=False
             ),
+        ])
+
+        fig.update_layout(title="Rating", xaxis_title="Iteration", yaxis_title="TrueSkill")
+
+        fig_smooth = go.Figure([
             go.Scatter(
                 x=x,
                 y=signal.savgol_filter(y,
-                                       53,  # window size used for filtering
+                                       9,  # window size used for filtering
                                        3),  # order of fitted polynomial
                 line=dict(color='rgba(175, 79, 219,0)'),
                 mode='lines',
@@ -356,10 +361,9 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             )
         ])
 
-        fig.update_layout(title="Rating", xaxis_title="Iteration", yaxis_title="TrueSkill")
-
         self.logger.log({
             "qualities": fig,
+            "qualities_smooth": fig_smooth,
         }, commit=False)
 
     def _add_opponent(self, agent):
