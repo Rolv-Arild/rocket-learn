@@ -27,6 +27,7 @@ from rlgym.utils import ObsBuilder, RewardFunction
 from rlgym.utils.action_parsers import ActionParser
 from trueskill import Rating, rate, SIGMA
 import plotly.graph_objs as go
+from scipy import signal
 
 from rlgym.envs import Match
 from rlgym.gamelaunch import LaunchPreference
@@ -343,6 +344,16 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                 name="sigma",
                 showlegend=False
             ),
+            go.Scatter(
+                x=x,
+                y=signal.savgol_filter(y,
+                                       53,  # window size used for filtering
+                                       3),  # order of fitted polynomial
+                line=dict(color='rgba(175, 79, 219,0)'),
+                mode='lines',
+                name='Smoothed',
+                showlegend=False,
+            )
         ])
 
         fig.update_layout(title="Rating", xaxis_title="Iteration", yaxis_title="TrueSkill")
