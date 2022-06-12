@@ -91,7 +91,7 @@ class Scoreboard:
                         self.scoreline[0] - self.scoreline[1]).item()
 
 
-FLOOR_AREA = BACK_WALL_Y * SIDE_WALL_X - 1152 * 1152  # Subtract corners
+FLOOR_AREA = 4 * BACK_WALL_Y * SIDE_WALL_X - 1152 * 1152  # Subtract corners
 GOAL_AREA = GOAL_HEIGHT * 880
 
 

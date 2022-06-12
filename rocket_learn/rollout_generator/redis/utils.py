@@ -16,8 +16,8 @@ import msgpack_numpy as m
 
 QUALITIES = "qualities-{}"
 N_UPDATES = "num-updates"
-SAVE_FREQ = "save-freq"
-MODEL_FREQ = "model-freq"
+# SAVE_FREQ = "save-freq"
+# MODEL_FREQ = "model-freq"
 
 MODEL_LATEST = "model-latest"
 VERSION_LATEST = "model-version"

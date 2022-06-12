@@ -172,3 +172,31 @@ class TouchHeight(StatTracker):
 
     def get_stat(self):
         return self.total_height / (self.count or 1)
+
+
+class DistToBall(StatTracker):
+    def __init__(self):
+        super().__init__("average_speed")
+        self.count = 0
+        self.total_dist = 0.0
+
+    def reset(self):
+        self.count = 0
+        self.total_dist = 0.0
+
+    def update(self, gamestates: np.ndarray, mask: np.ndarray):
+        players = gamestates[:, StateConstants.PLAYERS]
+        ball = gamestates[:, StateConstants.BALL_POSITION]
+        ball_x = ball[:, 0]
+        ball_y = ball[:, 1]
+        ball_z = ball[:, 2]
+        xs = players[:, StateConstants.CAR_POS_X]
+        ys = players[:, StateConstants.CAR_POS_Y]
+        zs = players[:, StateConstants.CAR_POS_Z]
+
+        dists = np.sqrt((ball_x - xs) ** 2 + (ball_y - ys) ** 2 + (ball_z - zs) ** 2)
+        self.total_dist += np.sum(dists)
+        self.count += dists.size
+
+    def get_stat(self):
+        return self.total_dist / (self.count or 1)

@@ -14,7 +14,7 @@ from rlgym.gym import Gym
 import rocket_learn.utils.generate_episode
 from rocket_learn.rollout_generator.redis.utils import _unserialize_model, MODEL_LATEST, WORKER_IDS, OPPONENT_MODELS, \
     VERSION_LATEST, _serialize, ROLLOUTS, encode_buffers, get_rating, LATEST_RATING_ID, \
-    EXPERIENCE_PER_MODE
+    EXPERIENCE_PER_MODE, decode_buffers
 from rocket_learn.utils.util import probability_NvsM
 from rocket_learn.utils.dynamic_gamemode_setter import DynamicGMSetter
 
@@ -156,8 +156,8 @@ class RedisRolloutWorker:
         """
         n = 0
         latest_version = None
-        t = Thread()
-        t.start()
+        # t = Thread()
+        # t.start()
         while True:
             # Get the most recent version available
             available_version = self.redis.get(VERSION_LATEST)
@@ -247,14 +247,16 @@ class RedisRolloutWorker:
                                               return_obs=self.send_obs,
                                               return_states=self.send_gamestates,
                                               return_rewards=True)
-                # sanity_check = decode_buffers(rollout_data, encode,
-                #                               lambda: self.match._obs_builder,
-                #                               lambda: self.match._reward_fn,
-                #                               lambda: self.match._action_parser)
+                # sanity_check = decode_buffers(rollout_data, versions,
+                #                               has_obs=False, has_states=True, has_rewards=True,
+                #                               obs_build_factory=lambda: self.match._obs_builder,
+                #                               rew_func_factory=lambda: self.match._reward_fn,
+                #                               act_parse_factory=lambda: self.match._action_parser)
                 rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result,
                                             self.send_obs, self.send_gamestates, True))
+
                 # while True:
-                t.join()
+                # t.join()
 
                 def send():
                     n_items = self.redis.rpush(ROLLOUTS, rollout_bytes)
@@ -262,9 +264,10 @@ class RedisRolloutWorker:
                         print("Had to limit rollouts. Learner may have have crashed, or is overloaded")
                         self.redis.ltrim(ROLLOUTS, -100, -1)
 
-                t = Thread(target=send)
-                t.start()
-                time.sleep(0.01)
+                send()
+                # t = Thread(target=send)
+                # t.start()
+                # time.sleep(0.01)
 
     def _generate_matchup(self, n_agents, latest_version, pretrained_choice):
         n_old = 0

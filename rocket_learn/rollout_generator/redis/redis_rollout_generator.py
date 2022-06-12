@@ -1,9 +1,11 @@
 import itertools
 from collections import Counter
-from typing import Iterator, Callable, Optional, Dict, Union, List
+from typing import Iterator, Callable, Optional, List
 
 import numpy as np
 import plotly.graph_objs as go
+# import matplotlib.pyplot  # noqa
+import wandb
 # from matplotlib.axes import Axes
 # from matplotlib.figure import Figure
 from redis import Redis
@@ -12,15 +14,11 @@ from rlgym.utils import ObsBuilder, RewardFunction
 from rlgym.utils.action_parsers import ActionParser
 from trueskill import Rating, rate, SIGMA
 
-# import matplotlib.pyplot  # noqa
-import wandb
-
-import rocket_learn.utils.generate_episode
 from rocket_learn.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
 from rocket_learn.rollout_generator.redis.utils import decode_buffers, _unserialize, QUALITIES, _serialize, ROLLOUTS, \
-    VERSION_LATEST, OPPONENT_MODELS, CONTRIBUTORS, N_UPDATES, SAVE_FREQ, MODEL_LATEST, _serialize_model, get_rating, \
-    _ALL, LATEST_RATING_ID, EXPERIENCE_PER_MODE, MODEL_FREQ
+    VERSION_LATEST, OPPONENT_MODELS, CONTRIBUTORS, N_UPDATES, MODEL_LATEST, _serialize_model, get_rating, \
+    _ALL, LATEST_RATING_ID, EXPERIENCE_PER_MODE
 from rocket_learn.utils.stat_trackers.stat_tracker import StatTracker
 
 
@@ -62,8 +60,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             self.redis.decr(VERSION_LATEST,
                             max_age + 1)  # In case of reload from old version, don't let current seep in
 
-        self.redis.set(SAVE_FREQ, save_every)
-        self.redis.set(MODEL_FREQ, model_every)
+        # self.redis.set(SAVE_FREQ, save_every)
+        # self.redis.set(MODEL_FREQ, model_every)
         self.save_freq = save_every
         self.model_freq = model_every
         self.contributors = Counter()  # No need to save, clears every iteration
@@ -304,7 +302,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.redis.set(MODEL_LATEST, model_bytes)
         self.redis.decr(VERSION_LATEST)
 
-        print("Top contributors:\n" + "\n".join(f"{c}: {n}" for c, n in self.contributors.most_common(5)))
+        print("Top contributors:\n" + "\n".join(f"\t{c}: {n}" for c, n in self.contributors.most_common(5)))
         self.logger.log({
             "redis/contributors": wandb.Table(columns=["name", "steps"], data=self.contributors.most_common())},
             commit=False
@@ -321,15 +319,17 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.tot_bytes = 0
 
         n_updates = self.redis.incr(N_UPDATES) - 1
-        save_freq = int(self.redis.get(SAVE_FREQ))
+        # save_freq = int(self.redis.get(SAVE_FREQ))
 
         if n_updates > 0:
             self.logger.log({f"stat/{name}": value for name, value in self._get_stats().items()}, commit=False)
         self._reset_stats()
 
-        if n_updates % save_freq == 0:
-            # self.redis.set(MODEL_N.format(self.n_updates // self.save_every), model_bytes)
+        if n_updates % self.model_freq == 0:
             self._add_opponent(model_bytes)
+
+        if n_updates % self.save_freq == 0:
+            # self.redis.set(MODEL_N.format(self.n_updates // self.save_every), model_bytes)
             try:
                 self.redis.save()
             except ResponseError:

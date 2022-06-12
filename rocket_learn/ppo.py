@@ -159,14 +159,16 @@ class PPO:
             self.calculate(_iter(), iteration)
             iteration += 1
 
-            if save_dir and iteration % iterations_per_save == 0:
-                self.save(current_run_dir, iteration, save_jit)  # noqa
+            if save_dir:
+                self.save(os.path.join(save_dir, self.logger.project + "_" + "latest"), -1, save_jit)
+                if iteration % iterations_per_save == 0:
+                    self.save(current_run_dir, iteration, save_jit)  # noqa
 
             self.rollout_generator.update_parameters(self.agent.actor)
 
             self.total_steps += self.n_steps  # size
             t1 = time.time()
-            self.logger.log({"ppo/fps": self.n_steps / (t1 - t0), "ppo/total_timesteps": self.total_steps})
+            self.logger.log({"ppo/steps_per_second": self.n_steps / (t1 - t0), "ppo/total_timesteps": self.total_steps})
 
             # pr.disable()
             # s = io.StringIO()
@@ -436,7 +438,6 @@ class PPO:
             "ppo/clip_fraction": tot_clipped / n,
             "ppo/epoch_time": (t1 - t0) / (1e6 * self.epochs),
             "ppo/update_magnitude": th.dist(precompute, postcompute, p=2),
-
         }, step=iteration, commit=False)  # Is committed after when calculating fps
 
     def load(self, load_location, continue_iterations=True):
