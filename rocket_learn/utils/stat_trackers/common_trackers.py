@@ -176,7 +176,7 @@ class TouchHeight(StatTracker):
 
 class DistToBall(StatTracker):
     def __init__(self):
-        super().__init__("average_speed")
+        super().__init__("distance_to_ball")
         self.count = 0
         self.total_dist = 0.0
 
@@ -187,9 +187,9 @@ class DistToBall(StatTracker):
     def update(self, gamestates: np.ndarray, mask: np.ndarray):
         players = gamestates[:, StateConstants.PLAYERS]
         ball = gamestates[:, StateConstants.BALL_POSITION]
-        ball_x = ball[:, 0]
-        ball_y = ball[:, 1]
-        ball_z = ball[:, 2]
+        ball_x = ball[:, 0].reshape((-1, 1))
+        ball_y = ball[:, 1].reshape((-1, 1))
+        ball_z = ball[:, 2].reshape((-1, 1))
         xs = players[:, StateConstants.CAR_POS_X]
         ys = players[:, StateConstants.CAR_POS_Y]
         zs = players[:, StateConstants.CAR_POS_Z]

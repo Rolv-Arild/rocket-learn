@@ -466,7 +466,7 @@ class PPO:
         version_str = str(self.logger.project) + "_" + str(current_step)
         version_dir = save_location + "\\" + version_str
 
-        os.makedirs(version_dir)
+        os.makedirs(version_dir, exist_ok=current_step == -1)
 
         torch.save({
             'epoch': current_step,
