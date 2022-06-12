@@ -14,7 +14,7 @@ from rlgym.gym import Gym
 import rocket_learn.utils.generate_episode
 from rocket_learn.rollout_generator.redis.utils import _unserialize_model, MODEL_LATEST, WORKER_IDS, OPPONENT_MODELS, \
     VERSION_LATEST, _serialize, ROLLOUTS, encode_buffers, get_rating, LATEST_RATING_ID, \
-    EXPERIENCE_PER_MODE, decode_buffers
+    EXPERIENCE_PER_MODE
 from rocket_learn.utils.util import probability_NvsM
 from rocket_learn.utils.dynamic_gamemode_setter import DynamicGMSetter
 
@@ -22,13 +22,29 @@ from rocket_learn.utils.dynamic_gamemode_setter import DynamicGMSetter
 class RedisRolloutWorker:
     """
     Provides RedisRolloutGenerator with rollouts via a Redis server
+
+     :param redis: redis object
+     :param name: rollout worker name
+     :param match: match object
+     :param past_version_prob: Odds of playing against previous checkpoints
+     :param evaluation_prob: Odds of running an evaluation match
+     :param sigma_target: Trueskill sigma target
+     :param dynamic_gm: Pick game mode dynamically. If True, Match.team_size should be 3
+     :param streamer_mode: Should run in streamer mode (less data printed to screen)
+     :param send_gamestates: Should gamestate data be sent back (increases data sent)
+     :param send_obs: Should observations be send back (increases data sent)
+     :param scoreboard: Scoreboard object
+     :param pretrained_agents: Dict{} of pretrained agents and their appearance probability
+     :param human_agent: human agent object. Sets a human match if not None
+     :param force_paging: Should paging be forced
+     :param auto_minimize: automatically minimize the launched rocket league instance
     """
 
     def __init__(self, redis: Redis, name: str, match: Match,
                  past_version_prob=.2, evaluation_prob=0.01, sigma_target=2,
-                 streamer_mode=False, send_gamestates=True, send_obs=True,
-                 scoreboard=None, pretrained_agents=None, human_agent=None,
-                 force_paging=False, auto_minimize=True):
+                 dynamic_gm=True, streamer_mode=False, send_gamestates=True,
+                 send_obs=True, scoreboard=None, pretrained_agents=None,
+                 human_agent=None, force_paging=False, auto_minimize=True):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -53,6 +69,7 @@ class RedisRolloutWorker:
         self.sigma_target = sigma_target
         self.send_gamestates = send_gamestates
         self.send_obs = send_obs
+        self.dynamic_gm = dynamic_gm
 
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.uuid = str(uuid4())
@@ -179,7 +196,11 @@ class RedisRolloutWorker:
             n += 1
             pretrained_choice = None
 
-            blue, orange = self.select_gamemode()
+            # only do this if dynamical_gm is on? otherwise set to match size?
+            if self.dynamic_gm:
+                blue, orange = self.select_gamemode()
+            else:
+                blue = orange = self.match.agents // 2
             self.set_team_size(blue, orange)
 
             if self.human_agent:
