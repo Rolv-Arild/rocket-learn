@@ -13,7 +13,7 @@ from rlgym.gym import Gym
 
 import rocket_learn.utils.generate_episode
 from rocket_learn.rollout_generator.redis.utils import _unserialize_model, MODEL_LATEST, WORKER_IDS, OPPONENT_MODELS, \
-    VERSION_LATEST, _serialize, ROLLOUTS, encode_buffers, get_rating, LATEST_RATING_ID, \
+    VERSION_LATEST, _serialize, ROLLOUTS, encode_buffers, decode_buffers, get_rating, LATEST_RATING_ID, \
     EXPERIENCE_PER_MODE
 from rocket_learn.utils.util import probability_NvsM
 from rocket_learn.utils.dynamic_gamemode_setter import DynamicGMSetter
@@ -119,7 +119,7 @@ class RedisRolloutWorker:
             for i in range(n_old):
                 index = np.random.randint(0, n_new + n_old)
                 matchups[index] = 'na'
-            return matchups
+            return matchups, ratings.values()
 
         else:
             if n_new == 0:  # Would-be evaluation game, but not enough agents
@@ -196,7 +196,6 @@ class RedisRolloutWorker:
             n += 1
             pretrained_choice = None
 
-            # only do this if dynamical_gm is on? otherwise set to match size?
             if self.dynamic_gm:
                 blue, orange = self.select_gamemode()
             else:
