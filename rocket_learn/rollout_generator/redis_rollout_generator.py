@@ -194,11 +194,13 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             clear=True,
             mmr_min_episode_length=150,
             max_age=0,
-            min_sigma=0
+            min_sigma=0,
+            smooth_ts=False,
     ):
         self.tot_bytes = 0
         self.redis = redis
         self.logger = logger
+        self.smooth_ts = smooth_ts
 
         # TODO saving/loading
         if clear:
@@ -312,7 +314,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         #                 CloudpickleWrapper(self.act_parse_factory)
         #             ))
 
-    def _plot_ratings(self, ratings):
+    def _plot_ratings(self, ratings, smooth=False):
         if len(ratings) <= 0:
             return
         mus = np.array([r.mu for r in ratings])
@@ -348,23 +350,30 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
 
         fig.update_layout(title="Rating", xaxis_title="Iteration", yaxis_title="TrueSkill")
 
-        fig_smooth = go.Figure([
-            go.Scatter(
-                x=x,
-                y=signal.savgol_filter(y,
-                                       9,  # window size used for filtering
-                                       3),  # order of fitted polynomial
-                line=dict(color='rgba(175, 79, 219,0)'),
-                mode='lines',
-                name='Smoothed',
-                showlegend=False,
-            )
-        ])
+        if smooth:
+            fig_smooth = go.Figure([
+                go.Scatter(
+                    x=x,
+                    y=signal.savgol_filter(y,
+                                           43,  # window size used for filtering
+                                           5),  # order of fitted polynomial
+                    line=dict(color='rgb(175, 79, 219)'),
+                    mode='lines',
+                    name='Smoothed',
+                    showlegend=False,
+                )
+            ])
 
-        self.logger.log({
-            "qualities": fig,
-            "qualities_smooth": fig_smooth,
-        }, commit=False)
+            fig_smooth.update_layout(title="Smoothed Rating", xaxis_title="Iteration", yaxis_title="TrueSkill")
+
+            self.logger.log({
+                "qualities": fig,
+                "qualities_smooth": fig_smooth,
+            }, commit=False)
+        else:
+            self.logger.log({
+                "qualities": fig,
+            }, commit=False)
 
     def _add_opponent(self, agent):
         # Add to list
@@ -391,7 +400,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             "contributors": wandb.Table(columns=["name", "steps"], data=self.contributors.most_common())},
             commit=False
         )
-        self._plot_ratings([Rating(*_unserialize(v)) for v in self.redis.lrange(QUALITIES, 0, -1)])
+        self._plot_ratings([Rating(*_unserialize(v)) for v in self.redis.lrange(QUALITIES, 0, -1)], self.smooth_ts)
         tot_contributors = self.redis.hgetall(CONTRIBUTORS)
         tot_contributors = Counter({name: int(count) for name, count in tot_contributors.items()})
         tot_contributors += self.contributors
