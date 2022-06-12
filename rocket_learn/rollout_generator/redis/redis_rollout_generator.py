@@ -92,10 +92,10 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         ratings = []
         relevant_buffers = []
         gamemode = f"{len(versions) // 2}v{len(versions) // 2}"  # TODO: support unfair games
+
+        versions = list(filter(('na').__ne__, versions))
         for version, buffer in itertools.zip_longest(versions, buffers):
-            if version == 'na':
-                continue  # no need to rate pretrained agents
-            elif isinstance(version, int) and version < 0:
+            if isinstance(version, int) and version < 0:
                 if abs(version - latest_version) <= self.max_age:
                     relevant_buffers.append(buffer)
                     self.contributors[name] += buffer.size()
