@@ -1,6 +1,5 @@
 class ExperienceBuffer:
-    def __init__(self, meta=None, observations=None, actions=None, rewards=None, dones=None, log_probs=None, infos=None):
-        self.meta = meta
+    def __init__(self, observations=None, actions=None, rewards=None, dones=None, log_probs=None, infos=None):
         self.result = 0
         self.observations = []
         self.actions = []
@@ -28,7 +27,7 @@ class ExperienceBuffer:
             self.infos = infos
 
     def size(self):
-        return len(self.dones)
+        return len(self.rewards)
 
     def add_step(self, observation, action, reward, done, log_prob, info):
         self.observations.append(observation)
@@ -48,9 +47,9 @@ class ExperienceBuffer:
 
     def generate_slices(self, batch_size):
         for i in range(0, len(self.observations), batch_size):
-            yield ExperienceBuffer(self.observations[i:i+batch_size],
-                                   self.actions[i:i+batch_size],
-                                   self.rewards[i:i+batch_size],
-                                   self.dones[i:i+batch_size],
-                                   self.log_probs[i:i+batch_size],
-                                   self.infos[i:i+batch_size])
+            yield ExperienceBuffer(self.observations[i:i + batch_size],
+                                   self.actions[i:i + batch_size],
+                                   self.rewards[i:i + batch_size],
+                                   self.dones[i:i + batch_size],
+                                   self.log_probs[i:i + batch_size],
+                                   self.infos[i:i + batch_size])

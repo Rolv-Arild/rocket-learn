@@ -9,7 +9,6 @@ import numba
 import numpy as np
 import torch
 import torch as th
-import tqdm
 from torch.nn import functional as F
 from torch.nn.utils import clip_grad_norm_
 
@@ -145,7 +144,6 @@ class PPO:
             def _iter():
                 size = 0
                 print(f"Collecting rollouts ({iteration})...")
-                # progress = tqdm.tqdm(desc=f"Collecting rollouts ({iteration})", total=self.n_steps, position=0, leave=True)
                 while size < self.n_steps:
                     try:
                         rollout = next(rollout_gen)
@@ -159,14 +157,16 @@ class PPO:
             self.calculate(_iter(), iteration)
             iteration += 1
 
-            if save_dir and iteration % iterations_per_save == 0:
-                self.save(current_run_dir, iteration, save_jit)  # noqa
+            if save_dir:
+                self.save(os.path.join(save_dir, self.logger.project + "_" + "latest"), -1, save_jit)
+                if iteration % iterations_per_save == 0:
+                    self.save(current_run_dir, iteration, save_jit)  # noqa
 
             self.rollout_generator.update_parameters(self.agent.actor)
 
             self.total_steps += self.n_steps  # size
             t1 = time.time()
-            self.logger.log({"fps": self.n_steps / (t1 - t0), "total_timesteps": self.total_steps})
+            self.logger.log({"ppo/steps_per_second": self.n_steps / (t1 - t0), "ppo/total_timesteps": self.total_steps})
 
             # pr.disable()
             # s = io.StringIO()
@@ -286,9 +286,9 @@ class PPO:
         ep_steps = np.array(ep_steps)
 
         self.logger.log({
-            "ep_reward_mean": ep_rewards.mean(),
-            "ep_reward_std": ep_rewards.std(),
-            "ep_len_mean": ep_steps.mean(),
+            "ppo/ep_reward_mean": ep_rewards.mean(),
+            "ppo/ep_reward_std": ep_rewards.std(),
+            "ppo/ep_len_mean": ep_steps.mean(),
         }, step=iteration, commit=False)
 
         if isinstance(obs_tensors[0], tuple):
@@ -427,15 +427,14 @@ class PPO:
 
         postcompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
         self.logger.log({
-            "loss": tot_loss / n,
-            "policy_loss": tot_policy_loss / n,
-            "entropy_loss": tot_entropy_loss / n,
-            "value_loss": tot_value_loss / n,
-            "mean_kl": total_kl_div / n,
-            "clip_fraction": tot_clipped / n,
-            "epoch_time": (t1 - t0) / (1e6 * self.epochs),
-            "update_magnitude": th.dist(precompute, postcompute, p=2),
-
+            "ppo/loss": tot_loss / n,
+            "ppo/policy_loss": tot_policy_loss / n,
+            "ppo/entropy_loss": tot_entropy_loss / n,
+            "ppo/value_loss": tot_value_loss / n,
+            "ppo/mean_kl": total_kl_div / n,
+            "ppo/clip_fraction": tot_clipped / n,
+            "ppo/epoch_time": (t1 - t0) / (1e6 * self.epochs),
+            "ppo/update_magnitude": th.dist(precompute, postcompute, p=2),
         }, step=iteration, commit=False)  # Is committed after when calculating fps
 
     def load(self, load_location, continue_iterations=True):
@@ -466,7 +465,7 @@ class PPO:
         version_str = str(self.logger.project) + "_" + str(current_step)
         version_dir = save_location + "\\" + version_str
 
-        os.makedirs(version_dir)
+        os.makedirs(version_dir, exist_ok=current_step == -1)
 
         torch.save({
             'epoch': current_step,
