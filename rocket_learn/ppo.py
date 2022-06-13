@@ -422,11 +422,17 @@ class PPO:
             self.agent.optimizer.zero_grad(set_to_none=self.zero_grads_with_none)
 
         t1 = time.perf_counter_ns()
+<<<<<<< HEAD
 
         assert n > 0
 
         postcompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
+=======
+>>>>>>> master
 
+        assert n > 0
+
+        postcompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
         self.logger.log({
             "ppo/loss": tot_loss / n,
             "ppo/policy_loss": tot_policy_loss / n,
