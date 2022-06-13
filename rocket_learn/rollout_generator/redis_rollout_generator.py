@@ -354,9 +354,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             fig_smooth = go.Figure([
                 go.Scatter(
                     x=x,
-                    y=signal.savgol_filter(y,
-                                           43,  # window size used for filtering
-                                           5),  # order of fitted polynomial
+                    y=signal.medfilt(y, 21),
                     line=dict(color='rgb(175, 79, 219)'),
                     mode='lines',
                     name='Smoothed',
