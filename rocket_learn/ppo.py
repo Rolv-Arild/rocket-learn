@@ -359,6 +359,9 @@ class PPO:
                 except RuntimeError as e:
                     print("RuntimeError in critic 2", e)
                     values_pred = self.agent.critic(obs)
+                except ValueError as e:
+                    print("ValueError in evaluate_actions", e)
+                    continue
 
                 values_pred = th.squeeze(values_pred)
                 adv = ret - values_pred
