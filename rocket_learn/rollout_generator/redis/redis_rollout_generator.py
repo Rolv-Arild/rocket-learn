@@ -84,8 +84,12 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         if any(version < 0 and abs(version - latest_version) > max_age for version in v_check):
             return
 
-        buffers, states = decode_buffers(rollout_data, versions, has_obs, has_states, has_rewards,
-                                         obs_build_func, rew_build_func, act_build_func)
+        try:
+            buffers, states = decode_buffers(rollout_data, versions, has_obs, has_states, has_rewards,
+                                             obs_build_func, rew_build_func, act_build_func)
+        except RuntimeError as e:
+            print("0 length gamestates")
+            return
         return buffers, states, versions, uuid, name, result
 
     def _update_ratings(self, name, versions, buffers, latest_version, result):
@@ -326,10 +330,12 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self._reset_stats()
 
         if n_updates % self.model_freq == 0:
+            print("Adding model to pool...")
             self._add_opponent(model_bytes)
 
         if n_updates % self.save_freq == 0:
             # self.redis.set(MODEL_N.format(self.n_updates // self.save_every), model_bytes)
+            print("Saving model...")
             try:
                 self.redis.save()
             except ResponseError:

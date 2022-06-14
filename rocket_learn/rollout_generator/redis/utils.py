@@ -105,6 +105,8 @@ def decode_buffers(enc_buffers, versions, has_obs, has_states, has_rewards,
     i = 0
     if has_states:
         game_states = enc_buffers[i]
+        if len(game_states) == 0:
+            raise RuntimeError
         i += 1
     else:
         game_states = None
@@ -199,89 +201,3 @@ def decode_buffers(enc_buffers, versions, has_obs, has_states, has_rewards,
                                  log_probs=log_probs[i])
             )
         return buffers, game_states
-
-    # ^ WIP
-
-    # if not has_obs:
-    #     if has_rewards:
-    #         states, rewards, actions, log_probs = enc_buffers
-    #     else:
-    #         states, actions, log_probs = enc_buffers
-    #     if len(enc_buffers) == 3:
-    #         game_states, actions, log_probs = enc_buffers
-    #         rewards = None
-    #     elif len(enc_buffers) == 4:
-    #         game_states, actions, log_probs, rewards = enc_buffers
-    #     else:
-    #         raise ValueError
-    #
-    #     obs_builder = obs_build_factory()
-    #     act_parser = act_parse_factory()
-    #
-    #     if isinstance(obs_builder, BatchedObsBuilder):
-    #         assert rewards is not None
-    #         obs = obs_builder.batched_build_obs(game_states[:-1])
-    #         prev_actions = act_parser.parse_actions(actions.reshape((-1,) + actions.shape[2:]).copy(), None).reshape(
-    #             actions.shape[:2] + (8,))
-    #         prev_actions = np.concatenate((np.zeros((actions.shape[0], 1, 8)), prev_actions[:, :-1]), axis=1)
-    #         obs_builder.add_actions(obs, prev_actions)
-    #         dones = np.zeros_like(rewards, dtype=bool)
-    #         dones[-1, :] = True
-    #         buffers = [
-    #             ExperienceBuffer(observations=[obs[i]], actions=actions[i], rewards=rewards[i], dones=dones[i],
-    #                              log_probs=log_probs[i])
-    #             for i in range(len(obs))
-    #         ]
-    #         return buffers
-    #
-    #     game_states = [GameState(gs.tolist()) for gs in game_states]
-    #     rew_func = rew_func_factory()
-    #     obs_builder.reset(game_states[0])
-    #     rew_func.reset(game_states[0])
-    #     buffers = [
-    #         ExperienceBuffer(infos=[{"state": game_states[0]}])
-    #         for _ in range(len(game_states[0].players))
-    #     ]
-    #
-    #     env_actions = [
-    #         act_parser.parse_actions(actions[:, s, :].copy(), game_states[s])
-    #         for s in range(actions.shape[1])
-    #     ]
-    #
-    #     obss = [obs_builder.build_obs(p, game_states[0], np.zeros(8))
-    #             for i, p in enumerate(game_states[0].players)]
-    #     for s, gs in enumerate(game_states[1:]):
-    #         assert len(gs.players) == len(versions)
-    #         final = s == len(game_states) - 2
-    #         old_obs = obss
-    #         obss = []
-    #         i = 0
-    #         for version in versions:
-    #             if version == 'na':
-    #                 continue  # don't want to rebuild or use prebuilt agents
-    #             player = gs.players[i]
-    #
-    #             # IF ONLY 1 buffer is returned, need a way to say to discard bad version
-    #
-    #             obs = obs_builder.build_obs(player, gs, env_actions[s][i])
-    #             if rewards is None:
-    #                 if final:
-    #                     rew = rew_func.get_final_reward(player, gs, env_actions[s][i])
-    #                 else:
-    #                     rew = rew_func.get_reward(player, gs, env_actions[s][i])
-    #             else:
-    #                 rew = rewards[i][s]
-    #             buffers[i].add_step(old_obs[i], actions[i][s], rew, final, log_probs[i][s], {"state": gs})
-    #             obss.append(obs)
-    #         i += 1
-    #
-    #     return buffers
-    # else:
-    #     buffers = []
-    #     for enc_buffer in enc_buffers:
-    #         obs, actions, rews, dones, log_probs = enc_buffer
-    #         buffers.append(
-    #             ExperienceBuffer(observations=obs, actions=actions,
-    #                              rewards=rews, dones=dones, log_probs=log_probs)
-    #         )
-    #     return buffers
