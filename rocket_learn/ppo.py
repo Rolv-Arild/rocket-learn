@@ -351,6 +351,9 @@ class PPO:
                 except RuntimeError as e:
                     print("RuntimeError in evaluate_actions", e)
                     log_prob, entropy = self.evaluate_actions(obs, act)  # Assuming obs and actions as input
+                except ValueError as e:
+                    print("ValueError in evaluate_actions", e)
+                    continue
 
                 ratio = torch.exp(log_prob - old_log_prob)
 
@@ -359,9 +362,6 @@ class PPO:
                 except RuntimeError as e:
                     print("RuntimeError in critic 2", e)
                     values_pred = self.agent.critic(obs)
-                except ValueError as e:
-                    print("ValueError in evaluate_actions", e)
-                    continue
 
                 values_pred = th.squeeze(values_pred)
                 adv = ret - values_pred
