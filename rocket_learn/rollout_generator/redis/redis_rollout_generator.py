@@ -84,12 +84,11 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         if any(version < 0 and abs(version - latest_version) > max_age for version in v_check):
             return
 
-        try:
+        buffers = states = None
+        if not any(version < 0 for version in v_check):
             buffers, states = decode_buffers(rollout_data, versions, has_obs, has_states, has_rewards,
                                              obs_build_func, rew_build_func, act_build_func)
-        except RuntimeError as e:
-            print("0 length gamestates")
-            return
+
         return buffers, states, versions, uuid, name, result
 
     def _update_ratings(self, name, versions, buffers, latest_version, result):
@@ -97,7 +96,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         relevant_buffers = []
         gamemode = f"{len(versions) // 2}v{len(versions) // 2}"  # TODO: support unfair games
 
-        versions = list(filter(('na').__ne__, versions))
+        versions = [v for v in versions if v != "na"]
         for version, buffer in itertools.zip_longest(versions, buffers):
             if isinstance(version, int) and version < 0:
                 if abs(version - latest_version) <= self.max_age:
