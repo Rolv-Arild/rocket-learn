@@ -280,7 +280,7 @@ class RedisRolloutWorker:
 
                 def send():
                     n_items = self.redis.rpush(ROLLOUTS, rollout_bytes)
-                    if n_items >= 200:
+                    if n_items >= 1000:
                         print("Had to limit rollouts. Learner may have have crashed, or is overloaded")
                         self.redis.ltrim(ROLLOUTS, -100, -1)
 
