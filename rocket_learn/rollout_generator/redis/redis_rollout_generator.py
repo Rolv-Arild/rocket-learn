@@ -84,10 +84,11 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         if any(version < 0 and abs(version - latest_version) > max_age for version in v_check):
             return
 
-        buffers = states = [None] * len(v_check)
-        if not any(version < 0 for version in v_check):
+        if any(version < 0 for version in v_check):
             buffers, states = decode_buffers(rollout_data, versions, has_obs, has_states, has_rewards,
                                              obs_build_func, rew_build_func, act_build_func)
+        else:
+            buffers = states = [None] * len(v_check)
 
         return buffers, states, versions, uuid, name, result
 
