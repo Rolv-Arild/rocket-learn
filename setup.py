@@ -10,7 +10,7 @@ Learning!
 
 setup(
    name='rocket_learn',
-   version='0.2.0',
+   version='0.2.1',
    description='Rocket Learn',
    author=['Rolv Arild', 'Daniel Downs'],
    url='https://github.com/Rolv-Arild/rocket-learn',
