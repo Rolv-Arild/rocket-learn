@@ -1,0 +1,27 @@
+name: Unit Test
+on: [push]
+jobs:
+  Unit-Test:
+    runs-on: windows-2022
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: '3.9.x'
+      - name: Download BakkesMod
+        run: Invoke-WebRequest https://github.com/bakkesmodorg/BakkesModInjectorCpp/releases/latest/download/BakkesModSetup.zip -O BakkesModSetup.zip
+      - name: Unzip BakkesMod
+        run: Expand-Archive -Path 'BakkesModSetup.zip' -DestinationPath 'BakkesModSetup'
+      - name: Install BakkesMod
+        run: BakkesModSetup\BakkesModSetup.exe /VERYSILENT /installfromdll=true
+      - name: Install dependencies
+        run:  |
+          python setup.py install
+          pip install rlgym
+          pip install pytest
+      - name: Run Test
+        run: pytest
+
+
