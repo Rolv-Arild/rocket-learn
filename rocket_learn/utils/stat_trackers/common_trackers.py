@@ -121,7 +121,7 @@ class Boost(StatTracker):
 
     def update(self, gamestates: np.ndarray, mask: np.ndarray):
         players = gamestates[:, StateConstants.PLAYERS]
-        boost = players[:, StateConstants.BOOST_AMOUNT]
+        boost = np.clip(players[:, StateConstants.BOOST_AMOUNT], 0, 1)
         self.total_boost += np.sum(boost)
         self.count += boost.size
 
