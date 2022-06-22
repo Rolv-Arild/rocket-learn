@@ -17,6 +17,7 @@ import msgpack_numpy as m
 import numpy as np
 # import matplotlib.pyplot  # noqa
 import psutil
+import redis.commands
 import wandb
 # from matplotlib.axes import Axes
 # from matplotlib.figure import Figure
@@ -197,6 +198,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
     ):
         self.tot_bytes = 0
         self.redis = redis
+        self.lastsave_ts = None
         self.logger = logger
 
         # TODO saving/loading
@@ -393,10 +395,13 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         if n_updates % save_freq == 0:
             # self.redis.set(MODEL_N.format(self.n_updates // self.save_every), model_bytes)
             self._add_opponent(model_bytes)
+            if self.lastsave_ts == self.redis.lastsave():
+                print("redis save error, previous bgsave failed")
+            self.lastsave_ts = self.redis.lastsave()
             try:
-                self.redis.save()
+                self.redis.bgsave()
             except ResponseError:
-                print("redis manual save aborted, save already in progress")
+                print("redis bgsave failed, auto save already in progress")
 
 
 class RedisRolloutWorker:
