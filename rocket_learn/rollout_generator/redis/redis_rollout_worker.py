@@ -31,8 +31,8 @@ class RedisRolloutWorker:
      :param sigma_target: Trueskill sigma target
      :param dynamic_gm: Pick game mode dynamically. If True, Match.team_size should be 3
      :param streamer_mode: Should run in streamer mode (less data printed to screen)
-     :param send_gamestates: Should gamestate data be sent back (increases data sent)
-     :param send_obs: Should observations be send back (increases data sent)
+     :param send_gamestates: Should gamestate data be sent back (increases data sent) - must send obs or gamestates
+     :param send_obs: Should observations be send back (increases data sent) - must send obs or gamestates
      :param scoreboard: Scoreboard object
      :param pretrained_agents: Dict{} of pretrained agents and their appearance probability
      :param human_agent: human agent object. Sets a human match if not None
@@ -48,6 +48,8 @@ class RedisRolloutWorker:
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
+
+        assert send_gamestates or send_obs, "Must have at least one of obs or states"
 
         self.pretrained_agents = {}
         self.pretrained_total_prob = 0
