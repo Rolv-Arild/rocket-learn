@@ -5,12 +5,15 @@ import time
 from threading import Thread
 from uuid import uuid4
 
+import sqlite3 as sql
+
 import numpy as np
 from redis import Redis
 from rlgym.envs import Match
 from rlgym.gamelaunch import LaunchPreference
 from rlgym.gym import Gym
 
+import rocket_learn.agent.policy
 import rocket_learn.utils.generate_episode
 from rocket_learn.rollout_generator.redis.utils import _unserialize_model, MODEL_LATEST, WORKER_IDS, OPPONENT_MODELS, \
     VERSION_LATEST, _serialize, ROLLOUTS, encode_buffers, decode_buffers, get_rating, LATEST_RATING_ID, \
@@ -71,9 +74,19 @@ class RedisRolloutWorker:
         self.send_obs = send_obs
         self.dynamic_gm = dynamic_gm
 
-        # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.uuid = str(uuid4())
         self.redis.rpush(WORKER_IDS, self.uuid)
+
+
+        # currently doesn't rebuild, if the old is there, reuse it.
+        self.sql = sql.connect('redis-model-cache.db')
+        # if the table doesn't exist in the database, make it
+        self.sql.execute("""
+            CREATE TABLE if not exists MODELS (
+                id TEXT PRIMARY KEY,
+                parameters BLOB NOT NULL
+            );
+        """)
 
         if not self.streamer_mode:
             print("Started worker", self.uuid, "on host", self.redis.connection_pool.connection_kwargs.get("host"),
@@ -157,9 +170,29 @@ class RedisRolloutWorker:
         return [-1 if i == -1 else keys[i] for i in matchups[k]], \
                [latest_rating if i == -1 else values[i] for i in matchups[k]]
 
+
+
     @functools.lru_cache(maxsize=8)
     def _get_past_model(self, version):
-        return _unserialize_model(self.redis.hget(OPPONENT_MODELS, version))
+        # if version in local database, query from database
+        # if not, pull from REDIS and store in disk cache
+        models = self.sql.execute("SELECT parameters FROM MODELS WHERE id == ?", (version,)).fetchall()
+        if len(models) == 0:
+            bytestream = self.redis.hget(OPPONENT_MODELS, version)
+            model = _unserialize_model(bytestream)
+
+            self.sql.execute('INSERT INTO MODELS (id, parameters) VALUES (?, ?)', (version, bytestream))
+            self.sql.commit()
+        else:
+            # should only ever be 1 version of parameters
+            assert len(models) <= 1
+            # stored as tuple due to sqlite,
+            assert len(models[0]) == 1
+
+            bytestream = models[0][0]
+            model = _unserialize_model(bytestream)
+
+        return model
 
     def select_gamemode(self):
         mode_exp = {m.decode("utf-8"): int(v) for m, v in self.redis.hgetall(EXPERIENCE_PER_MODE).items()}
