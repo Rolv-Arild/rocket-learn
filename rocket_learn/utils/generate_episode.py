@@ -5,7 +5,7 @@ import torch
 from rlgym.gym import Gym
 from rlgym.utils.reward_functions.common_rewards import ConstantReward
 from rlgym.utils.state_setters import DefaultState, StateWrapper
-from rlgym.utils.terminal_conditions.common_conditions import GoalScoredCondition
+from rlgym.utils.terminal_conditions.common_conditions import GoalScoredCondition, TimeoutCondition
 
 from rocket_learn.agent.policy import Policy
 from rocket_learn.agent.pretrained_policy import HardcodedAgent
@@ -23,7 +23,9 @@ def generate_episode(env: Gym, policies, evaluate=False, scoreboard=None) -> (Li
         reward = env._match._reward_fn  # noqa
         game_condition = GameCondition(tick_skip=env._match._tick_skip,
                                        forfeit_spg_limit=10 * env._match._team_size)  # noqa
-        env._match._terminal_conditions = [game_condition, GoalScoredCondition()]  # noqa
+        env._match._terminal_conditions = [game_condition,
+                                           GoalScoredCondition(),
+                                           TimeoutCondition(600 * (120 / game_condition.tick_skip))]  # noqa
         if isinstance(env._match._state_setter, DynamicGMSetter):  # noqa
             state_setter = env._match._state_setter.setter  # noqa
             env._match._state_setter.setter = DefaultState()  # noqa
@@ -142,7 +144,7 @@ def generate_episode(env: Gym, policies, evaluate=False, scoreboard=None) -> (Li
                 result += info["result"]
                 if not evaluate:
                     break
-                elif game_condition.done:  # noqa
+                elif game_condition.done or game_condition.overtime:  # noqa
                     break
                 else:
                     observations, info = env.reset(return_info=True)
