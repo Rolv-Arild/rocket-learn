@@ -3,6 +3,7 @@ import io
 import os
 import pstats
 import time
+import sys
 from typing import Iterator
 
 import numba
@@ -67,6 +68,7 @@ class PPO:
         self.agent = agent.to(device)
         self.device = device
         self.zero_grads_with_none = zero_grads_with_none
+        self.frozen_iterations = 0
 
         self.starting_iteration = 0
 
@@ -162,7 +164,16 @@ class PPO:
                 if iteration % iterations_per_save == 0:
                     self.save(current_run_dir, iteration, save_jit)  # noqa
 
-            self.rollout_generator.update_parameters(self.agent.actor)
+            if self.frozen_iterations > 0:
+                if self.frozen_iterations == 1:
+                    print(" ** Unfreezing policy network **")
+
+                    for param in self.agent.actor.parameters():
+                        param.requires_grad = True
+
+                self.frozen_iterations -= 1
+            else:
+                self.rollout_generator.update_parameters(self.agent.actor)
 
             self.total_steps += self.n_steps  # size
             t1 = time.time()
@@ -315,6 +326,9 @@ class PPO:
 
         print("Training network...")
 
+        if self.frozen_iterations > 0:
+            print("Policy network frozen, only updating value network...")
+
         precompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
         t0 = time.perf_counter_ns()
         self.agent.optimizer.zero_grad(set_to_none=self.zero_grads_with_none)
@@ -440,7 +454,7 @@ class PPO:
             "ppo/update_magnitude": th.dist(precompute, postcompute, p=2),
         }, step=iteration, commit=False)  # Is committed after when calculating fps
 
-    def load(self, load_location, continue_iterations=True):
+    def load(self, load_location, continue_iterations=True, reset_to_step=None):
         """
         load the model weights, optimizer values, and metadata
         :param load_location: checkpoint folder to read
@@ -450,7 +464,6 @@ class PPO:
         checkpoint = torch.load(load_location)
         self.agent.actor.load_state_dict(checkpoint['actor_state_dict'])
         self.agent.critic.load_state_dict(checkpoint['critic_state_dict'])
-        # self.agent.shared.load_state_dict(checkpoint['shared_state_dict'])
         self.agent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
         if continue_iterations:
@@ -458,11 +471,25 @@ class PPO:
             self.total_steps = checkpoint["total_steps"]
             print("Continuing training at iteration " + str(self.starting_iteration))
 
+        if reset_to_step:
+
+            warning_message = "This will permanently delete some of your model's progress. Are you POSITIVE you want " \
+                              "this? [y/n] "
+
+            key = ""
+            while key != 'y' and key != 'n':
+                key = input(warning_message)
+
+            if key == 'n':
+                print("reset stopped. Exiting")
+                sys.exit()
+
     def save(self, save_location, current_step, save_actor_jit=False):
         """
         Save the model weights, optimizer values, and metadata
         :param save_location: where to save
         :param current_step: the current iteration when saved. Use to later continue training
+        :param save_actor_jit: save the policy network as a torch jit file for rlbot use
         """
 
         version_str = str(self.logger.project) + "_" + str(current_step)
@@ -475,7 +502,6 @@ class PPO:
             "total_steps": self.total_steps,
             'actor_state_dict': self.agent.actor.state_dict(),
             'critic_state_dict': self.agent.critic.state_dict(),
-            # 'shared_state_dict': self.agent.shared.state_dict(),
             'optimizer_state_dict': self.agent.optimizer.state_dict(),
             # TODO save/load reward normalization mean, std, count
         }, version_dir + "\\checkpoint.pt")
@@ -483,3 +509,29 @@ class PPO:
         if save_actor_jit:
             traced_actor = th.jit.trace(self.agent.actor, self.jit_tracer)
             torch.jit.save(traced_actor, version_dir + "\\jit_policy.jit")
+
+
+    def freeze_policy(self, frozen_iterations=1000):
+        """
+        Freeze policy network to allow value network to settle. Useful with pretrained policy networks.
+
+        :param frozen_iterations: how many iterations the policy update will remain unchanged
+        """
+
+        print("-------------------------------------------------------------")
+        print("Policy Weights frozen for "+str(frozen_iterations)+" iterations")
+        print("-------------------------------------------------------------")
+
+        self.frozen_iterations = frozen_iterations
+
+        for param in self.agent.actor.parameters():
+            param.requires_grad = False
+
+        #for param in self.agent.optimizer.param_groups:
+        #    for p in param['params']:
+        #        if p.requires_grad == False:
+        #            del p
+
+        #filtered = filter(lambda p: p.requires_grad, self.agent.optimizer.param_groups)
+
+        #self.agent.optimizer.state_dict = self.agent.critic.parameters()

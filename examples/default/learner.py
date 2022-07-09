@@ -92,6 +92,7 @@ if __name__ == "__main__":
         SplitLayer(splits=split)
     ), split)
 
+    # CREATE THE OPTIMIZER
     optim = torch.optim.Adam([
         {"params": actor.parameters(), "lr": 5e-5},
         {"params": critic.parameters(), "lr": 5e-5}
@@ -100,7 +101,7 @@ if __name__ == "__main__":
     # PPO REQUIRES AN ACTOR/CRITIC AGENT
     agent = ActorCriticAgent(actor=actor, critic=critic, optimizer=optim)
 
-
+    # INSTANTIATE THE PPO TRAINING ALGORITHM
     alg = PPO(
         rollout_gen,
         agent,
@@ -117,6 +118,10 @@ if __name__ == "__main__":
         logger=logger,
         device="cuda",
     )
+
+    #OPTIONAL: FOR A PRETRAINED NETWORK, FREEZE THE POLICY NETWORK TO ALLOW THE CRITIC TO SETTLE
+    # commented out here to keep you from accidentally adding it via copy/paste
+    # alg.freeze_policy(500)
 
     # BEGIN TRAINING. IT WILL CONTINUE UNTIL MANUALLY STOPPED
     # -iterations_per_save SPECIFIES HOW OFTEN CHECKPOINTS ARE SAVED
