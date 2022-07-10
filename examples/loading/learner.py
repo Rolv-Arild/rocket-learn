@@ -77,6 +77,12 @@ if __name__ == "__main__":
     # LOAD A CHECKPOINT THAT WAS PREVIOUSLY SAVED AND CONTINUE TRAINING. OPTIONAL PARAMETER ALLOWS YOU
     # TO RESTART THE STEP COUNT INSTEAD OF CONTINUING
     alg.load("path\\from\\below\\checkpoint.pt")
+
+
+    # OPTIONAL: FOR A PRETRAINED NETWORK, FREEZE THE POLICY NETWORK TO ALLOW THE CRITIC TO SETTLE
+    # commented out here to keep you from accidentally adding it via copy/paste
+    # alg.freeze_policy(frozen_iterations=200)
+
     
     # BEGIN TRAINING. IT WILL CONTINUE UNTIL MANUALLY STOPPED
     # -iterations_per_save SPECIFIES HOW OFTEN CHECKPOINTS ARE SAVED

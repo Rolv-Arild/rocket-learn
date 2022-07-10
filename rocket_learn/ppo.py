@@ -454,7 +454,7 @@ class PPO:
             "ppo/update_magnitude": th.dist(precompute, postcompute, p=2),
         }, step=iteration, commit=False)  # Is committed after when calculating fps
 
-    def load(self, load_location, continue_iterations=True, reset_to_step=None):
+    def load(self, load_location, continue_iterations=True):
         """
         load the model weights, optimizer values, and metadata
         :param load_location: checkpoint folder to read
@@ -470,19 +470,6 @@ class PPO:
             self.starting_iteration = checkpoint['epoch']
             self.total_steps = checkpoint["total_steps"]
             print("Continuing training at iteration " + str(self.starting_iteration))
-
-        if reset_to_step:
-
-            warning_message = "This will permanently delete some of your model's progress. Are you POSITIVE you want " \
-                              "this? [y/n] "
-
-            key = ""
-            while key != 'y' and key != 'n':
-                key = input(warning_message)
-
-            if key == 'n':
-                print("reset stopped. Exiting")
-                sys.exit()
 
     def save(self, save_location, current_step, save_actor_jit=False):
         """
@@ -511,9 +498,11 @@ class PPO:
             torch.jit.save(traced_actor, version_dir + "\\jit_policy.jit")
 
 
-    def freeze_policy(self, frozen_iterations=1000):
+    def freeze_policy(self, frozen_iterations=100):
         """
         Freeze policy network to allow value network to settle. Useful with pretrained policy networks.
+
+        Note that network weights will not be transmitted when frozen.
 
         :param frozen_iterations: how many iterations the policy update will remain unchanged
         """
@@ -526,12 +515,3 @@ class PPO:
 
         for param in self.agent.actor.parameters():
             param.requires_grad = False
-
-        #for param in self.agent.optimizer.param_groups:
-        #    for p in param['params']:
-        #        if p.requires_grad == False:
-        #            del p
-
-        #filtered = filter(lambda p: p.requires_grad, self.agent.optimizer.param_groups)
-
-        #self.agent.optimizer.state_dict = self.agent.critic.parameters()

@@ -119,10 +119,6 @@ if __name__ == "__main__":
         device="cuda",
     )
 
-    #OPTIONAL: FOR A PRETRAINED NETWORK, FREEZE THE POLICY NETWORK TO ALLOW THE CRITIC TO SETTLE
-    # commented out here to keep you from accidentally adding it via copy/paste
-    # alg.freeze_policy(500)
-
     # BEGIN TRAINING. IT WILL CONTINUE UNTIL MANUALLY STOPPED
     # -iterations_per_save SPECIFIES HOW OFTEN CHECKPOINTS ARE SAVED
     # -save_dir SPECIFIES WHERE
