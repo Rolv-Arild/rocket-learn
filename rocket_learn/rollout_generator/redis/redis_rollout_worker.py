@@ -41,13 +41,15 @@ class RedisRolloutWorker:
      :param human_agent: human agent object. Sets a human match if not None
      :param force_paging: Should paging be forced
      :param auto_minimize: automatically minimize the launched rocket league instance
+     :param local_cache_name: name of local database used for model caching. If None, caching is not used
     """
 
     def __init__(self, redis: Redis, name: str, match: Match,
                  past_version_prob=.2, evaluation_prob=0.01, sigma_target=2,
                  dynamic_gm=True, streamer_mode=False, send_gamestates=True,
                  send_obs=True, scoreboard=None, pretrained_agents=None,
-                 human_agent=None, force_paging=False, auto_minimize=True):
+                 human_agent=None, force_paging=False, auto_minimize=True,
+                 local_cache_name=None):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -73,20 +75,22 @@ class RedisRolloutWorker:
         self.send_gamestates = send_gamestates
         self.send_obs = send_obs
         self.dynamic_gm = dynamic_gm
+        self.local_cache_name = local_cache_name
 
         self.uuid = str(uuid4())
         self.redis.rpush(WORKER_IDS, self.uuid)
 
 
         # currently doesn't rebuild, if the old is there, reuse it.
-        self.sql = sql.connect('redis-model-cache.db')
-        # if the table doesn't exist in the database, make it
-        self.sql.execute("""
-            CREATE TABLE if not exists MODELS (
-                id TEXT PRIMARY KEY,
-                parameters BLOB NOT NULL
-            );
-        """)
+        if self.local_cache_name:
+            self.sql = sql.connect('redis-model-cache'+local_cache_name+'.db')
+            # if the table doesn't exist in the database, make it
+            self.sql.execute("""
+                CREATE TABLE if not exists MODELS (
+                    id TEXT PRIMARY KEY,
+                    parameters BLOB NOT NULL
+                );
+            """)
 
         if not self.streamer_mode:
             print("Started worker", self.uuid, "on host", self.redis.connection_pool.connection_kwargs.get("host"),
@@ -176,21 +180,25 @@ class RedisRolloutWorker:
     def _get_past_model(self, version):
         # if version in local database, query from database
         # if not, pull from REDIS and store in disk cache
-        models = self.sql.execute("SELECT parameters FROM MODELS WHERE id == ?", (version,)).fetchall()
-        if len(models) == 0:
-            bytestream = self.redis.hget(OPPONENT_MODELS, version)
-            model = _unserialize_model(bytestream)
 
-            self.sql.execute('INSERT INTO MODELS (id, parameters) VALUES (?, ?)', (version, bytestream))
-            self.sql.commit()
+        if self.local_cache_name:
+            models = self.sql.execute("SELECT parameters FROM MODELS WHERE id == ?", (version,)).fetchall()
+            if len(models) == 0:
+                bytestream = self.redis.hget(OPPONENT_MODELS, version)
+                model = _unserialize_model(bytestream)
+
+                self.sql.execute('INSERT INTO MODELS (id, parameters) VALUES (?, ?)', (version, bytestream))
+                self.sql.commit()
+            else:
+                # should only ever be 1 version of parameters
+                assert len(models) <= 1
+                # stored as tuple due to sqlite,
+                assert len(models[0]) == 1
+
+                bytestream = models[0][0]
+                model = _unserialize_model(bytestream)
         else:
-            # should only ever be 1 version of parameters
-            assert len(models) <= 1
-            # stored as tuple due to sqlite,
-            assert len(models[0]) == 1
-
-            bytestream = models[0][0]
-            model = _unserialize_model(bytestream)
+            model = _unserialize_model(self.redis.hget(OPPONENT_MODELS, version))
 
         return model
 
