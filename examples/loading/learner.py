@@ -74,6 +74,7 @@ if __name__ == "__main__":
         logger=logger,
     )
 
+
     # LOAD A CHECKPOINT THAT WAS PREVIOUSLY SAVED AND CONTINUE TRAINING. OPTIONAL PARAMETER ALLOWS YOU
     # TO RESTART THE STEP COUNT INSTEAD OF CONTINUING
     alg.load("path\\from\\below\\checkpoint.pt")
