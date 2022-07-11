@@ -63,8 +63,8 @@ class RedisRolloutWorker:
         self.human_agent = human_agent
 
         if human_agent and pretrained_agents:
-            print("** WARNING - Human Player and Pretrain Agents are in conflict. **")
-            print("**           Pretrained Agents will be ignored.                **")
+            print("** WARNING - Human Player and Pretrained Agents are in conflict. **")
+            print("**           Pretrained Agents will be ignored.                  **")
 
         self.streamer_mode = streamer_mode
 
@@ -83,7 +83,7 @@ class RedisRolloutWorker:
 
         # currently doesn't rebuild, if the old is there, reuse it.
         if self.local_cache_name:
-            self.sql = sql.connect('redis-model-cache'+local_cache_name+'.db')
+            self.sql = sql.connect('redis-model-cache-'+local_cache_name+'.db')
             # if the table doesn't exist in the database, make it
             self.sql.execute("""
                 CREATE TABLE if not exists MODELS (
