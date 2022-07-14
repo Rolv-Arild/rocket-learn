@@ -45,7 +45,7 @@ if __name__ == "__main__":
     # CONFIG)
     redis = Redis(password="you_better_use_a_password")
 
-    # ENSURE OBSERVATION, REWARD, AND ACTION CHOICES ARE THE SAME IN THE WORKER
+    # ** ENSURE OBSERVATION, REWARD, AND ACTION CHOICES ARE THE SAME IN THE WORKER **
     def obs():
         return ExpandAdvancedObs()
 
@@ -57,12 +57,14 @@ if __name__ == "__main__":
 
 
     # THE ROLLOUT GENERATOR CAPTURES INCOMING DATA THROUGH REDIS AND PASSES IT TO THE LEARNER.
-    # -save_every SPECIFIES HOW OFTEN OLD VERSIONS ARE SAVED TO REDIS. THESE ARE USED FOR TRUESKILL
+    # -save_every SPECIFIES HOW OFTEN REDIS DATABASE IS BACKED UP TO DISK
+    # -model_every SPECIFIES HOW OFTEN OLD VERSIONS ARE SAVED TO REDIS. THESE ARE USED FOR TRUESKILL
     # COMPARISON AND TRAINING AGAINST PREVIOUS VERSIONS
     # -clear DELETE REDIS ENTRIES WHEN STARTING UP (SET TO FALSE TO CONTINUE WITH OLD AGENTS)
     rollout_gen = RedisRolloutGenerator(redis, obs, rew, act,
                                         logger=logger,
                                         save_every=100,
+                                        model_every=100,
                                         clear=False)
 
     # ROCKET-LEARN EXPECTS A SET OF DISTRIBUTIONS FOR EACH ACTION FROM THE NETWORK, NOT
@@ -90,6 +92,7 @@ if __name__ == "__main__":
         SplitLayer(splits=split)
     ), split)
 
+    # CREATE THE OPTIMIZER
     optim = torch.optim.Adam([
         {"params": actor.parameters(), "lr": 5e-5},
         {"params": critic.parameters(), "lr": 5e-5}
@@ -98,7 +101,7 @@ if __name__ == "__main__":
     # PPO REQUIRES AN ACTOR/CRITIC AGENT
     agent = ActorCriticAgent(actor=actor, critic=critic, optimizer=optim)
 
-
+    # INSTANTIATE THE PPO TRAINING ALGORITHM
     alg = PPO(
         rollout_gen,
         agent,
@@ -109,7 +112,6 @@ if __name__ == "__main__":
         epochs=10,
         gamma=599 / 600,
         clip_range=0.2,
-        ent_coef=0.01,
         gae_lambda=0.95,
         vf_coef=1,
         max_grad_norm=0.5,
