@@ -40,7 +40,7 @@ if __name__ == "__main__":
     # -ENSURE OBSERVATION, REWARD, AND ACTION CHOICES ARE THE SAME IN THE WORKER
     match = Match(
         game_speed=100,
-        self_play=True,
+        spawn_opponents=True,
         team_size=1,
         state_setter=DefaultState(),
         obs_builder=ExpandAdvancedObs(),
