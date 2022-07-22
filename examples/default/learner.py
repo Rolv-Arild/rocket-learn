@@ -61,7 +61,7 @@ if __name__ == "__main__":
     # -model_every SPECIFIES HOW OFTEN OLD VERSIONS ARE SAVED TO REDIS. THESE ARE USED FOR TRUESKILL
     # COMPARISON AND TRAINING AGAINST PREVIOUS VERSIONS
     # -clear DELETE REDIS ENTRIES WHEN STARTING UP (SET TO FALSE TO CONTINUE WITH OLD AGENTS)
-    rollout_gen = RedisRolloutGenerator(redis, obs, rew, act,
+    rollout_gen = RedisRolloutGenerator("demo-bot", redis, obs, rew, act,
                                         logger=logger,
                                         save_every=100,
                                         model_every=100,
