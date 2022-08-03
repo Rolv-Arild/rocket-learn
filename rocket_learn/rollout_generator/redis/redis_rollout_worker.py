@@ -77,7 +77,8 @@ class RedisRolloutWorker:
         self.send_obs = send_obs
         self.dynamic_gm = dynamic_gm
         self.gamemode_weights = gamemode_weights
-        assert sum(self.gamemode_weights.values()) == 1, "gamemode_weights must sum to 1"
+        if self.gamemode_weights is not None:
+            assert sum(self.gamemode_weights.values()) == 1, "gamemode_weights must sum to 1"
         self.local_cache_name = local_cache_name
 
         self.uuid = str(uuid4())
