@@ -44,6 +44,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             gamemodes=("1v1", "2v2", "3v3"),
             stat_trackers: Optional[List[StatTracker]] = None,
     ):
+        self.lastsave_ts = None
         self.name = name
         self.tot_bytes = 0
         self.redis = redis
@@ -336,7 +337,10 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         if n_updates % self.save_freq == 0:
             # self.redis.set(MODEL_N.format(self.n_updates // self.save_every), model_bytes)
             print("Saving model...")
+            if self.lastsave_ts == self.redis.lastsave():
+                print("redis save error, previous bgsave failed")
+            self.lastsave_ts = self.redis.lastsave()
             try:
-                self.redis.save()
+                self.redis.bgsave()
             except ResponseError:
-                print("redis manual save aborted, save already in progress")
+                print("redis bgsave failed, auto save already in progress")
