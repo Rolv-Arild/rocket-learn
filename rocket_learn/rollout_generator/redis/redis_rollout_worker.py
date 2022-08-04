@@ -211,7 +211,7 @@ class RedisRolloutWorker:
         if self.gamemode_weights is None:
             mode = min(mode_exp, key=mode_exp.get)
         else:
-            total = sum(mode_exp.values())
+            total = sum(mode_exp.values()) + 1e-8
             mode_exp = {k: mode_exp[k] / total for k in mode_exp.keys()}
             # find exp which is farthest below desired exp
             diff = {k: self.gamemode_weights[k] - mode_exp[k] for k in mode_exp.keys()}
