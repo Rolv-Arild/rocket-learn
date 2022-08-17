@@ -302,8 +302,8 @@ class GoalSpeed(StatTracker):
         self.total_speed = 0
 
     def update(self, gamestates: np.ndarray, mask: np.ndarray):
-        ball_speeds = gamestates[:, StateConstants.BALL_LINEAR_VELOCITY]
-        goal_speed = ball_speeds[-1]
+        gamestates = gamestates[-1]
+        goal_speed = gamestates[:, StateConstants.BALL_LINEAR_VELOCITY]
         goal_speed = np.linalg.norm(goal_speed)
 
         self.total_speed += goal_speed
@@ -322,9 +322,9 @@ class MaxGoalSpeed(StatTracker):
         self.max_speed = 0
 
     def update(self, gamestates: np.ndarray, mask: np.ndarray):
+        gamestates = gamestates[-1]
         ball_speeds = gamestates[:, StateConstants.BALL_LINEAR_VELOCITY]
-        goal_speed_array = ball_speeds[-1]
-        goal_speed = float(np.linalg.norm(goal_speed_array))
+        goal_speed = float(np.linalg.norm(ball_speeds))
 
         self.max_speed = max(float(self.max_speed), goal_speed)
 
