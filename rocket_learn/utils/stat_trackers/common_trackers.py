@@ -289,3 +289,64 @@ class BallHeight(StatTracker):
 
     def get_stat(self):
         return self.total_height / (self.count or 1)
+
+
+class GoalSpeed(StatTracker):
+    def __init__(self):
+        super().__init__("avg_goal_speed")
+        self.count = 0
+        self.total_speed = 0
+
+    def reset(self):
+        self.count = 0
+        self.total_speed = 0
+
+    def update(self, gamestates: np.ndarray, mask: np.ndarray):
+        ball_speeds = gamestates[:, StateConstants.BALL_LINEAR_VELOCITY]
+        goal_speed = ball_speeds[-1]
+        goal_speed = np.linalg.norm(goal_speed)
+
+        self.total_speed += goal_speed
+        self.count += 1
+
+    def get_stat(self):
+        return self.total_speed / (self.count or 1)
+
+
+class MaxGoalSpeed(StatTracker):
+    def __init__(self):
+        super().__init__("max_goal_speed")
+        self.max_speed = 0
+
+    def reset(self):
+        self.max_speed = 0
+
+    def update(self, gamestates: np.ndarray, mask: np.ndarray):
+        ball_speeds = gamestates[:, StateConstants.BALL_LINEAR_VELOCITY]
+        goal_speed_array = ball_speeds[-1]
+        goal_speed = float(np.linalg.norm(goal_speed_array))
+
+        self.max_speed = max(float(self.max_speed), goal_speed)
+
+    def get_stat(self):
+        return self.max_speed
+
+
+class CarOnGround(StatTracker):
+    def __init__(self):
+        super().__init__("pct_car_on_ground")
+        self.count = 0
+        self.total_ground = 0.0
+
+    def reset(self):
+        self.count = 0
+        self.total_ground = 0.0
+
+    def update(self, gamestates: np.ndarray, mask: np.ndarray):
+        on_ground = gamestates[:, StateConstants.ON_GROUND]
+
+        self.total_ground += np.sum(on_ground)
+        self.count += on_ground.size
+
+    def get_stat(self):
+        return 100 * self.total_ground / (self.count or 1)
