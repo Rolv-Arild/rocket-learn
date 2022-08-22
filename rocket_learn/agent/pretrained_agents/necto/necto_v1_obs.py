@@ -6,8 +6,6 @@ from rlgym.utils import ObsBuilder
 from rlgym.utils.common_values import BOOST_LOCATIONS, BLUE_TEAM, ORANGE_TEAM
 from rlgym.utils.gamestates import GameState, PlayerData
 
-from rocket_learn.utils.gamestate_encoding import encode_gamestate
-
 
 class NectoV1Obs(ObsBuilder):
     _boost_locations = np.array(BOOST_LOCATIONS)

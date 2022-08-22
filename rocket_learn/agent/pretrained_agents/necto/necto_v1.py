@@ -6,9 +6,11 @@ import torch
 import torch.nn.functional as F
 
 from rocket_learn.agent.pretrained_policy import HardcodedAgent
-from rocket_learn.agent.pretrained_agents.necto.necto_v1_obs import NectoV1Obs
+from pretrained_agents.necto.necto_v1_obs import NectoV1Obs
 
 from rlgym.utils.gamestates import GameState
+
+import copy
 
 
 class NectoV1(HardcodedAgent):
@@ -23,10 +25,11 @@ class NectoV1(HardcodedAgent):
         teammates = [p for p in state.players if p.team_num == player.team_num and p != player]
         opponents = [p for p in state.players if p.team_num != player.team_num]
 
-        state.players = [player] + teammates + opponents
+        necto_gamestate: GameState = copy.deepcopy(state)
+        necto_gamestate.players = [player] + teammates + opponents
 
-        self.obs_builder.reset(state)
-        obs = self.obs_builder.build_obs(player, state, self.previous_action)
+        self.obs_builder.reset(necto_gamestate)
+        obs = self.obs_builder.build_obs(player, necto_gamestate, self.previous_action)
 
         obs = tuple(torch.from_numpy(s).float() for s in obs)
         with torch.no_grad():
