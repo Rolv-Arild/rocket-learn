@@ -50,7 +50,8 @@ class RedisRolloutWorker:
                  dynamic_gm=True, streamer_mode=False, send_gamestates=True,
                  send_obs=True, scoreboard=None, pretrained_agents=None,
                  human_agent=None, force_paging=False, auto_minimize=True,
-                 local_cache_name=None, gamemode_weights=None):
+                 local_cache_name=None,
+                 gamemode_weights=None,):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
