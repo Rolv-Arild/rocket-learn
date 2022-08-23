@@ -2,17 +2,15 @@ import functools
 import itertools
 import os
 import time
-from threading import Thread
+from multiprocessing import Process, Pipe
+from collections import deque
 from uuid import uuid4
-
 import sqlite3 as sql
-
 import numpy as np
 from redis import Redis
 from rlgym.envs import Match
 from rlgym.gamelaunch import LaunchPreference
 from rlgym.gym import Gym
-
 import rocket_learn.agent.policy
 import rocket_learn.utils.generate_episode
 from rocket_learn.rollout_generator.redis.utils import _unserialize_model, MODEL_LATEST, WORKER_IDS, OPPONENT_MODELS, \
@@ -20,6 +18,32 @@ from rocket_learn.rollout_generator.redis.utils import _unserialize_model, MODEL
     EXPERIENCE_PER_MODE
 from rocket_learn.utils.util import probability_NvsM
 from rocket_learn.utils.dynamic_gamemode_setter import DynamicGMSetter
+from redis.retry import Retry
+from redis.backoff import ExponentialBackoff
+from redis.exceptions import ConnectionError, TimeoutError
+
+
+def rollout_uploader(redis_info, q):
+    redis = Redis(host=redis_info["host"],
+                  password=redis_info["password"],
+                  retry_on_error=[ConnectionError, TimeoutError],
+                  retry=Retry(ExponentialBackoff(cap=10, base=1), 25))
+
+    unsent_rollouts = deque([], maxlen=100)
+    while True:
+        while q.poll():
+            unsent_rollouts.append(q.recv())
+
+        if len(unsent_rollouts) > 0:
+            for _ in range(len(unsent_rollouts)):
+                rollout_bytes = _serialize(unsent_rollouts.popleft())
+                n_items = redis.rpush(ROLLOUTS, rollout_bytes)
+                if n_items >= 1000:
+                    print("Had to limit rollouts. Learner may have have crashed, or is overloaded")
+                    redis.ltrim(ROLLOUTS, -100, -1)
+        else:
+            time.sleep(1)
+
 
 
 class RedisRolloutWorker:
@@ -49,7 +73,7 @@ class RedisRolloutWorker:
                  dynamic_gm=True, streamer_mode=False, send_gamestates=True,
                  send_obs=True, scoreboard=None, pretrained_agents=None,
                  human_agent=None, force_paging=False, auto_minimize=True,
-                 local_cache_name=None):
+                 local_cache_name=None, redis_info=None, cache_writer=True):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -78,9 +102,15 @@ class RedisRolloutWorker:
         self.send_obs = send_obs
         self.dynamic_gm = dynamic_gm
         self.local_cache_name = local_cache_name
+        self.cache_writer = cache_writer
 
         self.uuid = str(uuid4())
         self.redis.rpush(WORKER_IDS, self.uuid)
+        rollout_local, rollout_p = Pipe()
+        self.rollout_q = rollout_local
+        self.rollout_uploader = Process(target=rollout_uploader, args=(redis_info, rollout_p), daemon=True)
+        self.rollout_uploader.start()
+
 
 
         # currently doesn't rebuild, if the old is there, reuse it.
@@ -204,6 +234,43 @@ class RedisRolloutWorker:
 
         return model
 
+
+    #@functools.lru_cache(maxsize=8)
+    def _get_latest_model(self, version, current_model):
+        # if version in local database, query from database
+        # if not, pull from REDIS and store in disk cache
+
+        models = self.sql.execute("SELECT parameters FROM MODELS WHERE id == ?", (version,)).fetchall()
+        if not self.cache_writer:
+            if len(models) == 0:
+                return None
+        else:
+            if len(models) == 0:
+
+                bytestream = self.redis.get(MODEL_LATEST)
+                model = _unserialize_model(bytestream)
+
+                self.sql.execute('INSERT INTO MODELS (id, parameters) VALUES (?, ?)', (version, bytestream))
+                self.sql.commit()
+
+                previous_check = self.sql.execute("SELECT parameters FROM MODELS WHERE id == ?", (version + 2,)).fetchall()
+                if len(previous_check) > 0:
+                    self.sql.execute(f"DELETE FROM MODELS WHERE id == '{version + 2}'")
+                    self.sql.commit()
+                    # self.sql.execute(f"DELETE id FROM MODELS WHERE id == '{version + 2}'")
+                    # self.sql.commit()
+                return model
+
+        # should only ever be 1 version of parameters
+        assert len(models) <= 1
+        # stored as tuple due to sqlite,
+        assert len(models[0]) == 1
+
+        bytestream = models[0][0]
+        model = _unserialize_model(bytestream)
+
+        return model
+
     def select_gamemode(self):
         mode_exp = {m.decode("utf-8"): int(v) for m, v in self.redis.hgetall(EXPERIENCE_PER_MODE).items()}
         mode = min(mode_exp, key=mode_exp.get)
@@ -228,13 +295,18 @@ class RedisRolloutWorker:
 
             # Only try to download latest version when new
             if latest_version != available_version:
-                model_bytes = self.redis.get(MODEL_LATEST)
-                if model_bytes is None:
-                    time.sleep(1)
-                    continue  # This is maybe not necessary? Can't hurt to leave it in.
-                latest_version = available_version
-                updated_agent = _unserialize_model(model_bytes)
-                self.current_agent = updated_agent
+                if self.local_cache_name:
+                    updated_agent = self._get_latest_model(available_version, self.current_agent)
+                else:
+                    model_bytes = self.redis.get(MODEL_LATEST)
+                    if model_bytes is None:
+                        time.sleep(1)
+                        continue  # This is maybe not necessary? Can't hurt to leave it in.
+                    updated_agent = _unserialize_model(model_bytes)
+
+                if updated_agent is not None:
+                    latest_version = available_version
+                    self.current_agent = updated_agent
 
             n += 1
             pretrained_choice = None
@@ -315,22 +387,15 @@ class RedisRolloutWorker:
                 #                               obs_build_factory=lambda: self.match._obs_builder,
                 #                               rew_func_factory=lambda: self.match._reward_fn,
                 #                               act_parse_factory=lambda: self.match._action_parser)
-                rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result,
-                                            self.send_obs, self.send_gamestates, True))
-
-                # while True:
-                # t.join()
+                # rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result,
+                #                             self.send_obs, self.send_gamestates, True))
+                rollout_bytes = (rollout_data, versions, self.uuid, self.name, result,self.send_obs,
+                                 self.send_gamestates, True)
 
                 def send():
-                    n_items = self.redis.rpush(ROLLOUTS, rollout_bytes)
-                    if n_items >= 1000:
-                        print("Had to limit rollouts. Learner may have have crashed, or is overloaded")
-                        self.redis.ltrim(ROLLOUTS, -100, -1)
+                    self.rollout_q.send(rollout_bytes)
 
                 send()
-                # t = Thread(target=send)
-                # t.start()
-                # time.sleep(0.01)
 
     def _generate_matchup(self, n_agents, latest_version, pretrained_choice):
         n_old = 0
