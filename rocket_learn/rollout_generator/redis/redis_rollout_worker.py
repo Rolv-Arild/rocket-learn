@@ -367,5 +367,7 @@ class RedisRolloutWorker:
                 else:
                     raise ValueError("Unknown version type")
                 agents.append(selected_agent)
+            if self.streamer_mode > 1:
+                agents[-1].deterministic = True
         versions = [v if v != -1 else latest_version for v in versions]
         return agents, pretrained_choice, versions, ratings
