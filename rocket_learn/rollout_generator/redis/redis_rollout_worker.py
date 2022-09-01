@@ -42,6 +42,7 @@ class RedisRolloutWorker:
      :param force_paging: Should paging be forced
      :param auto_minimize: automatically minimize the launched rocket league instance
      :param local_cache_name: name of local database used for model caching. If None, caching is not used
+     :param gamemode_weights: dict of dynamic gamemode choice weights. If None, default equal experience
     """
 
     def __init__(self, redis: Redis, name: str, match: Match,
@@ -49,7 +50,8 @@ class RedisRolloutWorker:
                  dynamic_gm=True, streamer_mode=False, send_gamestates=True,
                  send_obs=True, scoreboard=None, pretrained_agents=None,
                  human_agent=None, force_paging=False, auto_minimize=True,
-                 local_cache_name=None):
+                 local_cache_name=None,
+                 gamemode_weights=None,):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -77,6 +79,9 @@ class RedisRolloutWorker:
         self.send_gamestates = send_gamestates
         self.send_obs = send_obs
         self.dynamic_gm = dynamic_gm
+        self.gamemode_weights = gamemode_weights
+        if self.gamemode_weights is not None:
+            assert sum(self.gamemode_weights.values()) == 1, "gamemode_weights must sum to 1"
         self.local_cache_name = local_cache_name
 
         self.uuid = str(uuid4())
@@ -206,9 +211,17 @@ class RedisRolloutWorker:
 
     def select_gamemode(self):
         mode_exp = {m.decode("utf-8"): int(v) for m, v in self.redis.hgetall(EXPERIENCE_PER_MODE).items()}
-        mode = min(mode_exp, key=mode_exp.get)
+        if self.gamemode_weights is None:
+            mode = min(mode_exp, key=mode_exp.get)
+        else:
+            total = sum(mode_exp.values()) + 1e-8
+            mode_exp = {k: mode_exp[k] / total for k in mode_exp.keys()}
+            # find exp which is farthest below desired exp
+            diff = {k: self.gamemode_weights[k] - mode_exp[k] for k in mode_exp.keys()}
+            mode = max(diff, key=diff.get)
         b, o = mode.split("v")
         return int(b), int(o)
+
 
     def run(self):  # Mimics Thread
         """
