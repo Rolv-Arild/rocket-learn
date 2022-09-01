@@ -1,9 +1,7 @@
-from collections import Counter
 from typing import Any
 
 import numpy as np
-from rlgym_compat.common_values import BLUE_TEAM, ORANGE_TEAM
-from rlgym_compat.game_state import GameState, PlayerData
+from rlgym.utils.gamestates import GameState, PlayerData
 
 BOOST_LOCATIONS = (
     (0.0, -4240.0, 70.0),
