@@ -42,6 +42,7 @@ class RedisRolloutWorker:
      :param force_paging: Should paging be forced
      :param auto_minimize: automatically minimize the launched rocket league instance
      :param local_cache_name: name of local database used for model caching. If None, caching is not used
+     :param deterministic_streamer: forces the streamer mode to be deterministic only
     """
 
     def __init__(self, redis: Redis, name: str, match: Match,
@@ -49,7 +50,8 @@ class RedisRolloutWorker:
                  dynamic_gm=True, streamer_mode=False, send_gamestates=True,
                  send_obs=True, scoreboard=None, pretrained_agents=None,
                  human_agent=None, force_paging=False, auto_minimize=True,
-                 local_cache_name=None):
+                 local_cache_name=None,
+                 deterministic_streamer=False):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -69,8 +71,11 @@ class RedisRolloutWorker:
             print("**           Pretrained Agents will be ignored.                  **")
 
         self.streamer_mode = streamer_mode
+        self.deterministic_streamer = deterministic_streamer
 
         self.current_agent = _unserialize_model(self.redis.get(MODEL_LATEST))
+        if self.streamer_mode and self.deterministic_streamer:
+            self.current_agent.deterministic = True
         self.past_version_prob = past_version_prob
         self.evaluation_prob = evaluation_prob
         self.sigma_target = sigma_target
@@ -235,6 +240,8 @@ class RedisRolloutWorker:
                 latest_version = available_version
                 updated_agent = _unserialize_model(model_bytes)
                 self.current_agent = updated_agent
+                if self.streamer_mode and self.deterministic_streamer:
+                    self.current_agent.deterministic = True
 
             n += 1
             pretrained_choice = None
