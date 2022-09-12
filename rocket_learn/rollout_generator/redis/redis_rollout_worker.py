@@ -80,8 +80,11 @@ class RedisRolloutWorker:
         self.send_obs = send_obs
         self.dynamic_gm = dynamic_gm
         self.gamemode_weights = gamemode_weights
-        if self.gamemode_weights is not None:
-            assert sum(self.gamemode_weights.values()) == 1, "gamemode_weights must sum to 1"
+        self.updated_weights = True
+        if self.gamemode_weights is None:
+            self.gamemode_weights = {'1v1': 0.333334, '2v2': 0.333333, '3v3': 0.333333}
+        assert sum(self.gamemode_weights.values()) == 1, "gamemode_weights must sum to 1"
+        self.previous_weights = self.gamemode_weights
         self.local_cache_name = local_cache_name
 
         self.uuid = str(uuid4())
@@ -210,15 +213,20 @@ class RedisRolloutWorker:
         return model
 
     def select_gamemode(self):
-        mode_exp = {m.decode("utf-8"): int(v) for m, v in self.redis.hgetall(EXPERIENCE_PER_MODE).items()}
-        if self.gamemode_weights is None:
-            mode = min(mode_exp, key=mode_exp.get)
-        else:
+
+        if not self.updated_weights:
+            # update weights once per worker per new model
+            mode_exp = {m.decode("utf-8"): int(v) for m, v in self.redis.hgetall(EXPERIENCE_PER_MODE).items()}
             total = sum(mode_exp.values()) + 1e-8
             mode_exp = {k: mode_exp[k] / total for k in mode_exp.keys()}
             # find exp which is farthest below desired exp
             diff = {k: self.gamemode_weights[k] - mode_exp[k] for k in mode_exp.keys()}
-            mode = max(diff, key=diff.get)
+            self.gamemode_weights = {k: self.gamemode_weights[k] + diff[k] / 3 for k in self.gamemode_weights.keys()}
+            new_sum = sum(self.gamemode_weights.values())
+            self.gamemode_weights = {k: self.gamemode_weights[k] / new_sum for k in self.gamemode_weights.keys()}
+            self.updated_weights = True
+            print(f"New gamemode weights are {self.gamemode_weights}")
+        mode = np.random.choice(list(self.gamemode_weights.keys()), p=list(self.gamemode_weights.values()))
         b, o = mode.split("v")
         return int(b), int(o)
 
@@ -241,6 +249,7 @@ class RedisRolloutWorker:
 
             # Only try to download latest version when new
             if latest_version != available_version:
+                self.updated_weights = False
                 model_bytes = self.redis.get(MODEL_LATEST)
                 if model_bytes is None:
                     time.sleep(1)
