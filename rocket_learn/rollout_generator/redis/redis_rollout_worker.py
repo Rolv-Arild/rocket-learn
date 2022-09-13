@@ -84,7 +84,7 @@ class RedisRolloutWorker:
         if self.gamemode_weights is None:
             self.gamemode_weights = {'1v1': 0.333334, '2v2': 0.333333, '3v3': 0.333333}
         assert sum(self.gamemode_weights.values()) == 1, "gamemode_weights must sum to 1"
-        self.previous_weights = self.gamemode_weights
+        self.target_weights = self.gamemode_weights
         self.local_cache_name = local_cache_name
 
         self.uuid = str(uuid4())
@@ -220,8 +220,8 @@ class RedisRolloutWorker:
             total = sum(mode_exp.values()) + 1e-8
             mode_exp = {k: mode_exp[k] / total for k in mode_exp.keys()}
             # find exp which is farthest below desired exp
-            diff = {k: self.gamemode_weights[k] - mode_exp[k] for k in mode_exp.keys()}
-            self.gamemode_weights = {k: self.gamemode_weights[k] + diff[k] / 3 for k in self.gamemode_weights.keys()}
+            diff = {k: self.target_weights[k] - mode_exp[k] for k in mode_exp.keys()}
+            self.gamemode_weights = {k: max(self.gamemode_weights[k] + diff[k] / 3, 0) for k in self.gamemode_weights.keys()}
             new_sum = sum(self.gamemode_weights.values())
             self.gamemode_weights = {k: self.gamemode_weights[k] / new_sum for k in self.gamemode_weights.keys()}
             self.updated_weights = True
