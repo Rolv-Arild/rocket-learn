@@ -51,7 +51,10 @@ class RedisRolloutWorker:
                  send_obs=True, scoreboard=None, pretrained_agents=None,
                  human_agent=None, force_paging=False, auto_minimize=True,
                  local_cache_name=None,
-                 gamemode_weights=None,):
+                 gamemode_weights=None,
+                 batch_mode=False,
+                 step_size=100_000,
+                 ):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -87,6 +90,11 @@ class RedisRolloutWorker:
         self.uuid = str(uuid4())
         self.redis.rpush(WORKER_IDS, self.uuid)
 
+        self.batch_mode = batch_mode
+        self.step_size_limit = min(step_size / 20, 25_000)
+        if self.batch_mode:
+            self.red_pipe = self.redis.pipeline()
+            self.step_last_send = 0
 
         # currently doesn't rebuild, if the old is there, reuse it.
         if self.local_cache_name:
@@ -318,7 +326,7 @@ class RedisRolloutWorker:
                 if not self.streamer_mode:
                     print(post_stats)
 
-            if not self.streamer_mode:
+            if not self.streamer_mode and not self.batch_mode:
                 rollout_data = encode_buffers(rollouts,
                                               return_obs=self.send_obs,
                                               return_states=self.send_gamestates,
@@ -344,6 +352,26 @@ class RedisRolloutWorker:
                 # t = Thread(target=send)
                 # t.start()
                 # time.sleep(0.01)
+
+            elif not self.streamer_mode and self.batch_mode:
+
+                rollout_data = encode_buffers(rollouts,
+                                              return_obs=self.send_obs,
+                                              return_states=self.send_gamestates,
+                                              return_rewards=True)
+                rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result,
+                                            self.send_obs, self.send_gamestates, True))
+
+                self.red_pipe.rpush(ROLLOUTS, rollout_bytes)
+
+                #  def send():
+                if (self.total_steps_generated - self.step_last_send) > self.step_size_limit or \
+                        len(self.red_pipe) > 100:
+                    n_items = self.red_pipe.execute()
+                    if n_items[-1] >= 10000:
+                        print("Had to limit rollouts. Learner may have have crashed, or is overloaded")
+                        self.redis.ltrim(ROLLOUTS, -100, -1)
+                    self.step_last_send = self.total_steps_generated
 
     def _generate_matchup(self, n_agents, latest_version, pretrained_choice):
         n_old = 0
