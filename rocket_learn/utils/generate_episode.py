@@ -58,7 +58,7 @@ def generate_episode(env: Gym, policies, evaluate=False, scoreboard=None) -> (Li
             if not isinstance(observations, list):
                 observations = [observations]
 
-            if all(policy == policies[0] for policy in policies):
+            if not isinstance(policies[0], HardcodedAgent) and all(policy == policies[0] for policy in policies):
                 policy = policies[0]
                 if isinstance(observations[0], tuple):
                     obs = tuple(np.concatenate([obs[i] for obs in observations], axis=0)
