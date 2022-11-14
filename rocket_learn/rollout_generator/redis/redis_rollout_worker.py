@@ -86,11 +86,12 @@ class RedisRolloutWorker:
         assert sum(self.gamemode_weights.values()) == 1, "gamemode_weights must sum to 1"
         self.target_weights = copy.copy(self.gamemode_weights)
         # change weights from percentage of experience desired to percentage of gamemodes necessary (approx)
-        for k in self.gamemode_weights.keys():
+        self.current_weights = copy.copy(self.gamemode_weights)
+        for k in self.current_weights.keys():
             b, o = k.split("v")
-            self.gamemode_weights[k] /= int(b)
-        weights_sum = sum(self.gamemode_weights.values())
-        self.gamemode_weights = {k: self.gamemode_weights[k] / weights_sum for k in self.gamemode_weights.keys()}
+            self.current_weights[k] /= int(b)
+        weights_sum = sum(self.current_weights.values())
+        self.current_weights = {k: self.current_weights[k] / weights_sum for k in self.current_weights.keys()}
         self.experience = {'1v1': 0, '2v2': 0, '3v3': 0}
         self.local_cache_name = local_cache_name
 
@@ -228,10 +229,10 @@ class RedisRolloutWorker:
         for k in diff.keys():
             b, o = k.split("v")
             diff[k] *= int(b)
-        self.gamemode_weights = {k: max(self.gamemode_weights[k] + diff[k], 0) for k in self.gamemode_weights.keys()}
-        new_sum = sum(self.gamemode_weights.values())
-        self.gamemode_weights = {k: self.gamemode_weights[k] / new_sum for k in self.gamemode_weights.keys()}
-        mode = np.random.choice(list(self.gamemode_weights.keys()), p=list(self.gamemode_weights.values()))
+        self.current_weights = {k: max(self.current_weights[k] + diff[k], 0) for k in self.current_weights.keys()}
+        new_sum = sum(self.current_weights.values())
+        self.current_weights = {k: self.current_weights[k] / new_sum for k in self.current_weights.keys()}
+        mode = np.random.choice(list(self.current_weights.keys()), p=list(self.current_weights.values()))
         b, o = mode.split("v")
         return int(b), int(o)
 
