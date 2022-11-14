@@ -148,6 +148,7 @@ def decode_buffers(enc_buffers, versions, has_obs, has_states, has_rewards,
             ]
             return buffers, game_states
         else:  # Slow reconstruction, but works for any ObsBuilder
+            gs_arrays = game_states
             game_states = [GameState(gs.tolist()) for gs in game_states]
             rew_func = rew_func_factory()
             obs_builder.reset(game_states[0])
@@ -189,7 +190,7 @@ def decode_buffers(enc_buffers, versions, has_obs, has_states, has_rewards,
                     obss.append(obs)
                 i += 1
 
-            return buffers, game_states
+            return buffers, gs_arrays
     else:  # We have everything we need
         buffers = []
         for i in range(len(obs)):
