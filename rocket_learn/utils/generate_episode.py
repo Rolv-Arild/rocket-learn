@@ -5,7 +5,7 @@ import torch
 from rlgym.gym import Gym
 from rlgym.utils.reward_functions.common_rewards import ConstantReward
 from rlgym.utils.state_setters import DefaultState, StateWrapper
-from rlgym.utils.terminal_conditions.common_conditions import GoalScoredCondition, TimeoutCondition, NoTouchTimeoutCondition
+from rlgym.utils.terminal_conditions.common_conditions import GoalScoredCondition
 
 from rocket_learn.agent.policy import Policy
 from rocket_learn.agent.pretrained_policy import HardcodedAgent
@@ -21,10 +21,9 @@ def generate_episode(env: Gym, policies, evaluate=False, scoreboard=None) -> (Li
         from rlgym_tools.extra_terminals.game_condition import GameCondition  # tools is an optional dependency
         terminals = env._match._terminal_conditions  # noqa
         reward = env._match._reward_fn  # noqa
-        fps = 120.0/env._match._tick_skip
         game_condition = GameCondition(tick_skip=env._match._tick_skip,
                                        forfeit_spg_limit=10 * env._match._team_size)  # noqa
-        env._match._terminal_conditions = [game_condition, GoalScoredCondition(), TimeoutCondition(fps * 300), NoTouchTimeoutCondition(fps*60)]  # noqa
+        env._match._terminal_conditions = [game_condition, GoalScoredCondition()]  # noqa
         if isinstance(env._match._state_setter, DynamicGMSetter):  # noqa
             state_setter = env._match._state_setter.setter  # noqa
             env._match._state_setter.setter = DefaultState()  # noqa
@@ -59,7 +58,7 @@ def generate_episode(env: Gym, policies, evaluate=False, scoreboard=None) -> (Li
             if not isinstance(observations, list):
                 observations = [observations]
 
-            if all(policy == policies[0] for policy in policies):
+            if not isinstance(policies[0], HardcodedAgent) and all(policy == policies[0] for policy in policies):
                 policy = policies[0]
                 if isinstance(observations[0], tuple):
                     obs = tuple(np.concatenate([obs[i] for obs in observations], axis=0)
@@ -85,7 +84,8 @@ def generate_episode(env: Gym, policies, evaluate=False, scoreboard=None) -> (Li
                             actions = np.array(actions)
 
                         # TODO: add converter that takes normal 8 actions into action space
-                        # env._match._action_parser.convert_to_action_space(actions)
+                        # actions = env._match._action_parser.convert_to_action_space(actions)
+
                         all_indices.append(None)
                         all_actions.append(actions)
                         all_log_probs.append(None)
@@ -114,6 +114,8 @@ def generate_episode(env: Gym, policies, evaluate=False, scoreboard=None) -> (Li
                 padded_actions.append(action)
 
             all_actions = padded_actions
+            # TEST OUT ABOVE TO DEAL WITH VARIABLE LENGTH
+
             all_actions = np.vstack(all_actions)
             old_obs = observations
             observations, rewards, done, info = env.step(all_actions)
