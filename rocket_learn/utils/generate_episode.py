@@ -21,9 +21,11 @@ def generate_episode(env: Gym, policies, evaluate=False, scoreboard=None) -> (Li
         from rlgym_tools.extra_terminals.game_condition import GameCondition  # tools is an optional dependency
         terminals = env._match._terminal_conditions  # noqa
         reward = env._match._reward_fn  # noqa
-        game_condition = GameCondition(tick_skip=env._match._tick_skip,
-                                       forfeit_spg_limit=10 * env._match._team_size)  # noqa
-        env._match._terminal_conditions = [game_condition, GoalScoredCondition()]  # noqa
+        game_condition = GameCondition(tick_skip=env._match._tick_skip,  # noqa
+                                       seconds_per_goal_forfeit=10 * env._match._team_size,
+                                       max_overtime_seconds=300,
+                                       max_no_touch_seconds=60)
+        env._match._terminal_conditions = [game_condition]  # noqa
         if isinstance(env._match._state_setter, DynamicGMSetter):  # noqa
             state_setter = env._match._state_setter.setter  # noqa
             env._match._state_setter.setter = DefaultState()  # noqa
