@@ -5,7 +5,8 @@ import torch
 from rlgym.gym import Gym
 from rlgym.utils.reward_functions.common_rewards import ConstantReward
 from rlgym.utils.state_setters import DefaultState, StateWrapper
-from rlgym.utils.terminal_conditions.common_conditions import GoalScoredCondition
+from rlgym.utils.terminal_conditions.common_conditions import GoalScoredCondition,\
+    TimeoutCondition, NoTouchTimeoutCondition
 
 from rocket_learn.agent.policy import Policy
 from rocket_learn.agent.pretrained_policy import HardcodedAgent
@@ -21,9 +22,11 @@ def generate_episode(env: Gym, policies, evaluate=False, scoreboard=None) -> (Li
         from rlgym_tools.extra_terminals.game_condition import GameCondition  # tools is an optional dependency
         terminals = env._match._terminal_conditions  # noqa
         reward = env._match._reward_fn  # noqa
+        fps = 120.0 / env._match._tick_skip
         game_condition = GameCondition(tick_skip=env._match._tick_skip,
                                        forfeit_spg_limit=10 * env._match._team_size)  # noqa
-        env._match._terminal_conditions = [game_condition, GoalScoredCondition()]  # noqa
+        env._match._terminal_conditions = [game_condition, GoalScoredCondition(), TimeoutCondition(fps * 300),
+                                           NoTouchTimeoutCondition(fps*60)]  # noqa
         if isinstance(env._match._state_setter, DynamicGMSetter):  # noqa
             state_setter = env._match._state_setter.setter  # noqa
             env._match._state_setter.setter = DefaultState()  # noqa
