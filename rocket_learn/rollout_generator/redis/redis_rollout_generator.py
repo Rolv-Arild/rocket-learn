@@ -202,6 +202,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                             means[mode][v] = (mean[0] + r.mu, mean[1] + r.sigma ** 2)
                             # *Smoothly* transition from red, to green, to blue depending on gamemode
                     mid = (len(self.gamemodes) - 1) / 2
+                    # avoid divide by 0 issues if there's only one gamemode, this moves it halfway into the colors
                     if mid == 0:
                         mid = 0.5
                     if i < mid:
