@@ -93,6 +93,7 @@ class RedisRolloutWorker:
         weights_sum = sum(self.current_weights.values())
         self.current_weights = {k: self.current_weights[k] / weights_sum for k in self.current_weights.keys()}
         self.experience = {'1v1': 0, '2v2': 0, '3v3': 0}
+        self.mean_exp_grant = {'1v1': 1000, '2v2': 2000, '3v3': 3000}
         self.local_cache_name = local_cache_name
 
         self.uuid = str(uuid4())
