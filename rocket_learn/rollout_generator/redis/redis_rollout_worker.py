@@ -2,6 +2,7 @@ import functools
 import itertools
 import os
 import time
+import copy
 from threading import Thread
 from uuid import uuid4
 
@@ -79,8 +80,17 @@ class RedisRolloutWorker:
         self.send_obs = send_obs
         self.dynamic_gm = dynamic_gm
         self.gamemode_weights = gamemode_weights
-        if self.gamemode_weights is not None:
-            assert sum(self.gamemode_weights.values()) == 1, "gamemode_weights must sum to 1"
+        if self.gamemode_weights is None:
+            self.gamemode_weights = {'1v1': 1/3, '2v2': 1/3, '3v3': 1/3}
+        assert sum(self.gamemode_weights.values()) == 1, "gamemode_weights must sum to 1"
+        self.target_weights = copy.copy(self.gamemode_weights)
+        # change weights from percentage of experience desired to percentage of gamemodes necessary (approx)
+        for k in self.gamemode_weights.keys():
+            b, o = k.split("v")
+            self.gamemode_weights[k] /= int(b)
+        weights_sum = sum(self.gamemode_weights.values())
+        self.gamemode_weights = {k: self.gamemode_weights[k] / weights_sum for k in self.gamemode_weights.keys()}
+        self.experience = {'1v1': 0, '2v2': 0, '3v3': 0}
         self.local_cache_name = local_cache_name
 
         self.uuid = str(uuid4())
@@ -209,15 +219,18 @@ class RedisRolloutWorker:
         return model
 
     def select_gamemode(self):
-        mode_exp = {m.decode("utf-8"): int(v) for m, v in self.redis.hgetall(EXPERIENCE_PER_MODE).items()}
-        if self.gamemode_weights is None:
-            mode = min(mode_exp, key=mode_exp.get)
-        else:
-            total = sum(mode_exp.values()) + 1e-8
-            mode_exp = {k: mode_exp[k] / total for k in mode_exp.keys()}
-            # find exp which is farthest below desired exp
-            diff = {k: self.gamemode_weights[k] - mode_exp[k] for k in mode_exp.keys()}
-            mode = max(diff, key=diff.get)
+
+        total = sum(self.experience.values()) + 1e-8
+        mode_exp = {k: self.experience[k] / total for k in self.experience.keys()}
+        diff = {k: self.target_weights[k] - mode_exp[k] for k in mode_exp.keys()}
+        # change diff from experience weights to gamemode weights
+        for k in diff.keys():
+            b, o = k.split("v")
+            diff[k] *= int(b)
+        self.gamemode_weights = {k: max(self.gamemode_weights[k] + diff[k], 0) for k in self.gamemode_weights.keys()}
+        new_sum = sum(self.gamemode_weights.values())
+        self.gamemode_weights = {k: self.gamemode_weights[k] / new_sum for k in self.gamemode_weights.keys()}
+        mode = np.random.choice(list(self.gamemode_weights.keys()), p=list(self.gamemode_weights.values()))
         b, o = mode.split("v")
         return int(b), int(o)
 
@@ -312,7 +325,9 @@ class RedisRolloutWorker:
                 state = rollouts[0].infos[-2]["state"]
                 goal_speed = np.linalg.norm(state.ball.linear_velocity) * 0.036  # kph
                 str_result = ('+' if result > 0 else "") + str(result)
-                self.total_steps_generated += len(rollouts[0].observations) * len(rollouts)
+                episode_exp = len(rollouts[0].observations) * len(rollouts)
+                self.total_steps_generated += episode_exp
+                self.experience[f"{blue}v{orange}"] += episode_exp
                 post_stats = f"Rollout finished after {len(rollouts[0].observations)} steps ({self.total_steps_generated} total steps), result was {str_result}"
                 if result != 0:
                     post_stats += f", goal speed: {goal_speed:.2f} kph"
