@@ -195,7 +195,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                     sigmas = []
                     for k, r in ratings.items():  # noqa
                         if k.endswith(mode):
-                            v = int(k.split("-")[1][1:])
+                            v = int(k.rsplit("-", 2)[1][1:])
+                            # v = int(k.split("-")[1][1:])
                             x.append(v)
                             mus.append(r.mu)
                             sigmas.append(r.sigma)
