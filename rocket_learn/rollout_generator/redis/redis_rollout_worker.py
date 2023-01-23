@@ -44,6 +44,7 @@ class RedisRolloutWorker:
      :param auto_minimize: automatically minimize the launched rocket league instance
      :param local_cache_name: name of local database used for model caching. If None, caching is not used
      :param gamemode_weights: dict of dynamic gamemode choice weights. If None, default equal experience
+     :param gamemode_weight_ema_alpha: alpha for the exponential moving average of gamemode weighting
     """
 
     def __init__(self, redis: Redis, name: str, match: Match,
