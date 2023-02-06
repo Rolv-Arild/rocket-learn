@@ -4,16 +4,18 @@ import os
 import pstats
 import time
 import sys
-from typing import Iterator
+from typing import Iterator, List, Tuple
 
 import numba
 import numpy as np
 import torch
 import torch as th
+from torch.distributions import kl_divergence
 from torch.nn import functional as F
 from torch.nn.utils import clip_grad_norm_
 
 from rocket_learn.agent.actor_critic_agent import ActorCriticAgent
+from rocket_learn.agent.policy import Policy
 from rocket_learn.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
 
@@ -60,6 +62,7 @@ class PPO:
             logger=None,
             device="cuda",
             zero_grads_with_none=False,
+            kl_models_weights: List[Tuple[float, Policy]] = None
     ):
         self.rollout_generator = rollout_generator
 
@@ -96,6 +99,8 @@ class PPO:
         self.logger.watch((self.agent.actor, self.agent.critic))
         self.timer = time.time_ns() // 1_000_000
         self.jit_tracer = None
+
+        self.kl_models_weights = kl_models_weights
 
     def update_reward_norm(self, rewards: np.ndarray) -> np.ndarray:
         batch_mean = np.mean(rewards)
@@ -199,7 +204,7 @@ class PPO:
         entropy = self.agent.actor.entropy(dist, actions)
 
         entropy = -torch.mean(entropy)
-        return log_prob, entropy
+        return log_prob, entropy, dist
 
     @staticmethod
     @numba.njit
@@ -253,22 +258,10 @@ class PPO:
 
             with th.no_grad():
                 if isinstance(obs_tensor, tuple):
-                    try:
-                        x = tuple(o.to(self.device) for o in obs_tensor)
-                    except RuntimeError as e:
-                        print("RuntimeError in obs transfer", e)
-                        x = tuple(o.to(self.device) for o in obs_tensor)
+                    x = tuple(o.to(self.device) for o in obs_tensor)
                 else:
-                    try:
-                        x = obs_tensor.to(self.device)
-                    except RuntimeError as e:
-                        print("RuntimeError in obs transfer", e)
-                        x = obs_tensor.to(self.device)
-                try:
-                    values = self.agent.critic(x).detach().cpu().numpy().flatten()  # No batching?
-                except RuntimeError as e:
-                    print("RuntimeError in critic 1", e)
-                    values = self.agent.critic(x).detach().cpu().numpy().flatten()  # No batching?
+                    x = obs_tensor.to(self.device)
+                values = self.agent.critic(x).detach().cpu().numpy().flatten()  # No batching?
 
             actions = np.stack(buffer.actions)
             log_probs = np.stack(buffer.log_probs)
@@ -318,6 +311,7 @@ class PPO:
         tot_value_loss = 0
         total_kl_div = 0
         tot_clipped = 0
+        tot_kl_other_models = 0
 
         n = 0
 
@@ -361,21 +355,14 @@ class PPO:
 
                 # TODO optimization: use forward_actor_critic instead of separate in case shared, also use GPU
                 try:
-                    log_prob, entropy = self.evaluate_actions(obs, act)  # Assuming obs and actions as input
-                except RuntimeError as e:
-                    print("RuntimeError in evaluate_actions", e)
-                    log_prob, entropy = self.evaluate_actions(obs, act)  # Assuming obs and actions as input
+                    log_prob, entropy, dist = self.evaluate_actions(obs, act)  # Assuming obs and actions as input
                 except ValueError as e:
                     print("ValueError in evaluate_actions", e)
                     continue
 
                 ratio = torch.exp(log_prob - old_log_prob)
 
-                try:
-                    values_pred = self.agent.critic(obs)
-                except RuntimeError as e:
-                    print("RuntimeError in critic 2", e)
-                    values_pred = self.agent.critic(obs)
+                values_pred = self.agent.critic(obs)
 
                 values_pred = th.squeeze(values_pred)
                 adv = ret - values_pred
@@ -395,7 +382,14 @@ class PPO:
                 else:
                     entropy_loss = entropy
 
-                loss = ((policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss)
+                kl_other_models = 0
+                if self.kl_models_weights is not None:
+                    for model, kl_coef in self.kl_models_weights:
+                        with torch.no_grad():
+                            dist_other = model.get_action_distribution(obs)
+                        kl_other_models += kl_coef * kl_divergence(dist, dist_other).mean()
+
+                loss = ((policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss + kl_other_models)
                         / (self.batch_size / self.minibatch_size))
 
                 if not torch.isfinite(loss).all():
@@ -428,6 +422,7 @@ class PPO:
                 tot_entropy_loss += entropy_loss.item()
                 tot_value_loss += value_loss.item()
                 tot_clipped += th.mean((th.abs(ratio - 1) > self.clip_range).float()).item()
+                tot_kl_other_models += kl_other_models
                 n += 1
                 # pb.update(self.minibatch_size)
 
@@ -452,6 +447,7 @@ class PPO:
             "ppo/clip_fraction": tot_clipped / n,
             "ppo/epoch_time": (t1 - t0) / (1e6 * self.epochs),
             "ppo/update_magnitude": th.dist(precompute, postcompute, p=2),
+            "ppo/kl_other_models": tot_kl_other_models / n,
         }, step=iteration, commit=False)  # Is committed after when calculating fps
 
     def load(self, load_location, continue_iterations=True):
@@ -497,7 +493,6 @@ class PPO:
             traced_actor = th.jit.trace(self.agent.actor, self.jit_tracer)
             torch.jit.save(traced_actor, version_dir + "\\jit_policy.jit")
 
-
     def freeze_policy(self, frozen_iterations=100):
         """
         Freeze policy network to allow value network to settle. Useful with pretrained policy networks.
@@ -508,7 +503,7 @@ class PPO:
         """
 
         print("-------------------------------------------------------------")
-        print("Policy Weights frozen for "+str(frozen_iterations)+" iterations")
+        print("Policy Weights frozen for " + str(frozen_iterations) + " iterations")
         print("-------------------------------------------------------------")
 
         self.frozen_iterations = frozen_iterations
