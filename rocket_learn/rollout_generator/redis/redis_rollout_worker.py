@@ -117,6 +117,7 @@ class RedisRolloutWorker:
     def _get_opponent_ids(self, n_new, n_old, pretrained_choice):
         # Get qualities
         gamemode = f"{(n_new + n_old) // 2}v{(n_new + n_old) // 2}"
+        gamemode = '1v0' if gamemode == '0v0' else gamemode
         latest_id = self.redis.get(LATEST_RATING_ID).decode("utf-8")
         latest_key = f"{latest_id}-stochastic"
         if n_old == 0:
