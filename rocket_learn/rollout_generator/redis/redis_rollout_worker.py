@@ -254,6 +254,9 @@ class RedisRolloutWorker:
 
             if self.dynamic_gm:
                 blue, orange = self.select_gamemode()
+            elif self.match.agents == 1:
+                blue = 1
+                orange = 0
             else:
                 blue = orange = self.match.agents // 2
             self.set_team_size(blue, orange)

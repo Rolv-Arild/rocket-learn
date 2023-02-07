@@ -312,7 +312,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             "redis/contributors": wandb.Table(columns=["name", "steps"], data=self.contributors.most_common())},
             commit=False
         )
-        self._plot_ratings()
+        if self.gamemodes[0] != '1v0':
+            self._plot_ratings()
         tot_contributors = self.redis.hgetall(CONTRIBUTORS)
         tot_contributors = Counter({name: int(count) for name, count in tot_contributors.items()})
         tot_contributors += self.contributors
