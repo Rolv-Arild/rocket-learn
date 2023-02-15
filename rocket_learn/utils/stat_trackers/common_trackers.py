@@ -121,7 +121,9 @@ class Boost(StatTracker):
 
     def update(self, gamestates: np.ndarray, mask: np.ndarray):
         players = gamestates[:, StateConstants.PLAYERS]
-        boost = np.clip(players[:, StateConstants.BOOST_AMOUNT], 0, 1)
+        boost = players[:, StateConstants.BOOST_AMOUNT]
+        is_limited = (0 <= boost) & (boost <= 1)
+        boost = boost[is_limited]
         self.total_boost += np.sum(boost)
         self.count += boost.size
 
@@ -143,7 +145,8 @@ class BehindBall(StatTracker):
         players = gamestates[:, StateConstants.PLAYERS]
         ball_y = gamestates[:, StateConstants.BALL_POSITION.start + 1]
         player_y = players[:, StateConstants.CAR_POS_Y]
-        behind = (2 * players[:, StateConstants.TEAM_NUMS] - 1) * (ball_y.reshape(-1, 1) - player_y) < 0
+        is_orange = players[:, StateConstants.TEAM_NUMS]
+        behind = (2 * is_orange - 1) * (ball_y.reshape(-1, 1) - player_y) < 0
 
         self.total_behind += np.sum(behind)
         self.count += behind.size

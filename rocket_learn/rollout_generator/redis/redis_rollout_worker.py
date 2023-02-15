@@ -50,7 +50,7 @@ class RedisRolloutWorker:
                  dynamic_gm=True, streamer_mode=False, send_gamestates=True,
                  send_obs=True, scoreboard=None, pretrained_agents=None,
                  human_agent=None, force_paging=False, auto_minimize=True,
-                 local_cache_name=None, gamemode_weights=None,):
+                 local_cache_name=None, gamemode_weights=None, ):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -72,6 +72,7 @@ class RedisRolloutWorker:
         self.streamer_mode = streamer_mode
 
         self.current_agent = _unserialize_model(self.redis.get(MODEL_LATEST))
+
         self.past_version_prob = past_version_prob
         self.evaluation_prob = evaluation_prob
         self.sigma_target = sigma_target
@@ -86,10 +87,9 @@ class RedisRolloutWorker:
         self.uuid = str(uuid4())
         self.redis.rpush(WORKER_IDS, self.uuid)
 
-
         # currently doesn't rebuild, if the old is there, reuse it.
         if self.local_cache_name:
-            self.sql = sql.connect('redis-model-cache-'+local_cache_name+'.db')
+            self.sql = sql.connect('redis-model-cache-' + local_cache_name + '.db')
             # if the table doesn't exist in the database, make it
             self.sql.execute("""
                 CREATE TABLE if not exists MODELS (
@@ -143,7 +143,6 @@ class RedisRolloutWorker:
                 index = np.random.randint(0, n_new + n_old)
                 matchups[index] = 'na'
             return matchups, ratings.values()
-
         else:
             if n_new == 0:  # Would-be evaluation game, but not enough agents
                 n_new = n_old
@@ -163,7 +162,7 @@ class RedisRolloutWorker:
             probs[i] = (p * (1 - p)) ** (2 / (n_old + n_new))  # Be a little bit less strict the more players there are
         probs /= probs.sum()
 
-        old_versions = np.random.choice(len(probs), size=n_old, p=probs, replace=n_new > 0).tolist()
+        old_versions = np.random.choice(len(probs), size=n_old, p=probs, replace=True).tolist()
         versions += old_versions
 
         # Then calculate the full matchup, with just permutations of the selected versions (weighted by fairness)
@@ -179,8 +178,6 @@ class RedisRolloutWorker:
         k = np.random.choice(len(matchups), p=qualities / qualities.sum())
         return [-1 if i == -1 else keys[i] for i in matchups[k]], \
                [latest_rating if i == -1 else values[i] for i in matchups[k]]
-
-
 
     @functools.lru_cache(maxsize=8)
     def _get_past_model(self, version):
@@ -210,17 +207,25 @@ class RedisRolloutWorker:
 
     def select_gamemode(self):
         mode_exp = {m.decode("utf-8"): int(v) for m, v in self.redis.hgetall(EXPERIENCE_PER_MODE).items()}
+        modes = list(mode_exp.keys())
+        dist = np.array(list(mode_exp.values())) + 1
+        dist = dist / dist.sum()
         if self.gamemode_weights is None:
-            mode = min(mode_exp, key=mode_exp.get)
+            target_dist = np.ones(len(modes))
         else:
-            total = sum(mode_exp.values()) + 1e-8
-            mode_exp = {k: mode_exp[k] / total for k in mode_exp.keys()}
-            # find exp which is farthest below desired exp
-            diff = {k: self.gamemode_weights[k] - mode_exp[k] for k in mode_exp.keys()}
-            mode = max(diff, key=diff.get)
+            target_dist = np.array([self.gamemode_weights[k] for k in modes])
+        target_dist = target_dist / np.array([sum(int(n) for n in m.split("v")) for m in modes])
+        target_dist = target_dist / target_dist.sum()
+        inv_dist = 1 - dist
+        inv_dist = inv_dist / inv_dist.sum()
+
+        dist = target_dist * inv_dist
+        dist = dist / dist.sum()
+
+        mode = np.random.choice(modes, p=dist)
+
         b, o = mode.split("v")
         return int(b), int(o)
-
 
     def run(self):  # Mimics Thread
         """
@@ -351,20 +356,21 @@ class RedisRolloutWorker:
         n_old = 0
         if n_agents > 1:
             r = np.random.random()
-            rand_choice = (r - self.evaluation_prob) / (1 - self.evaluation_prob)
 
             if r < self.evaluation_prob:
                 n_old = n_agents
-            elif rand_choice < self.past_version_prob:
-                n_old = np.random.randint(low=1, high=n_agents)
-            elif rand_choice < (self.past_version_prob + self.pretrained_total_prob):
-                wheel_prob = self.past_version_prob
-                for agent in self.pretrained_agents:
-                    wheel_prob += self.pretrained_agents[agent]
-                    if rand_choice < wheel_prob:
-                        pretrained_choice = agent
-                        n_old = np.random.randint(low=1, high=n_agents)
-                        break
+            else:
+                rand_choice = (r - self.evaluation_prob) / (1 - self.evaluation_prob)
+                if rand_choice < self.past_version_prob:
+                    n_old = np.random.randint(low=1, high=n_agents)
+                elif rand_choice < (self.past_version_prob + self.pretrained_total_prob):
+                    wheel_prob = self.past_version_prob
+                    for agent in self.pretrained_agents:
+                        wheel_prob += self.pretrained_agents[agent]
+                        if rand_choice < wheel_prob:
+                            pretrained_choice = agent
+                            n_old = np.random.randint(low=1, high=n_agents)
+                            break
         n_new = n_agents - n_old
         versions, ratings = self._get_opponent_ids(n_new, n_old, pretrained_choice)
         agents = []

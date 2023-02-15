@@ -62,7 +62,7 @@ class PPO:
             logger=None,
             device="cuda",
             zero_grads_with_none=False,
-            kl_models_weights: List[Tuple[float, Policy]] = None
+            kl_models_weights: List[Tuple[Policy, float]] = None
     ):
         self.rollout_generator = rollout_generator
 
@@ -72,6 +72,7 @@ class PPO:
         self.device = device
         self.zero_grads_with_none = zero_grads_with_none
         self.frozen_iterations = 0
+        self._saved_lr = None
 
         self.starting_iteration = 0
 
@@ -173,12 +174,13 @@ class PPO:
                 if self.frozen_iterations == 1:
                     print(" ** Unfreezing policy network **")
 
-                    for param in self.agent.actor.parameters():
-                        param.requires_grad = True
+                    assert self._saved_lr is not None
+                    self.agent.optimizer.param_groups[0]["lr"] = self._saved_lr
+                    self._saved_lr = None
 
                 self.frozen_iterations -= 1
-            else:
-                self.rollout_generator.update_parameters(self.agent.actor)
+
+            self.rollout_generator.update_parameters(self.agent.actor)
 
             self.total_steps += self.n_steps  # size
             t1 = time.time()
@@ -328,7 +330,6 @@ class PPO:
         self.agent.optimizer.zero_grad(set_to_none=self.zero_grads_with_none)
         for e in range(self.epochs):
             # this is mostly pulled from sb3
-
             indices = torch.randperm(returns_tensor.shape[0])[:self.batch_size]
             if isinstance(obs_tensor, tuple):
                 obs_batch = tuple(o[indices] for o in obs_tensor)
@@ -386,6 +387,7 @@ class PPO:
                 if self.kl_models_weights is not None:
                     for model, kl_coef in self.kl_models_weights:
                         with torch.no_grad():
+                            # obs = tuple(o.copy() for o in obs) if isinstance(obs, tuple) else obs.copy()
                             dist_other = model.get_action_distribution(obs)
                         kl_other_models += kl_coef * kl_divergence(dist, dist_other).mean()
 
@@ -508,5 +510,5 @@ class PPO:
 
         self.frozen_iterations = frozen_iterations
 
-        for param in self.agent.actor.parameters():
-            param.requires_grad = False
+        self._saved_lr = self.agent.optimizer.param_groups[0]["lr"]
+        self.agent.optimizer.param_groups[0]["lr"] = 0
