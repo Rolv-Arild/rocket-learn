@@ -345,7 +345,8 @@ class CarOnGround(StatTracker):
         self.total_ground = 0.0
 
     def update(self, gamestates: np.ndarray, mask: np.ndarray):
-        on_ground = gamestates[:, StateConstants.ON_GROUND]
+        players = gamestates[:, StateConstants.PLAYERS]
+        on_ground = players[:, StateConstants.ON_GROUND]
 
         self.total_ground += np.sum(on_ground)
         self.count += on_ground.size
