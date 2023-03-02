@@ -4,7 +4,7 @@ import os
 import pstats
 import time
 import sys
-from typing import Iterator, List, Tuple
+from typing import Iterator, List, Tuple, Union
 
 import numba
 import numpy as np
@@ -62,7 +62,7 @@ class PPO:
             logger=None,
             device="cuda",
             zero_grads_with_none=False,
-            kl_models_weights: List[Tuple[Policy, float]] = None
+            kl_models_weights: List[Union[Tuple[Policy, float], Tuple[Policy, float, float]]] = None
     ):
         self.rollout_generator = rollout_generator
 
@@ -101,6 +101,11 @@ class PPO:
         self.timer = time.time_ns() // 1_000_000
         self.jit_tracer = None
 
+        if kl_models_weights is not None:
+            for i in range(len(kl_models_weights)):
+                assert len(kl_models_weights[i]) in (2, 3)
+                if len(kl_models_weights[i]) == 2:
+                    kl_models_weights[i] = kl_models_weights[i] + (None,)
         self.kl_models_weights = kl_models_weights
 
     def update_reward_norm(self, rewards: np.ndarray) -> np.ndarray:
@@ -313,7 +318,8 @@ class PPO:
         tot_value_loss = 0
         total_kl_div = 0
         tot_clipped = 0
-        tot_kl_other_models = 0
+        tot_kl_other_models = np.zeros(len(self.kl_models_weights))
+        tot_kl_coeffs = np.zeros(len(self.kl_models_weights))
 
         n = 0
 
@@ -383,15 +389,19 @@ class PPO:
                 else:
                     entropy_loss = entropy
 
-                kl_other_models = 0
+                kl_loss = 0
                 if self.kl_models_weights is not None:
-                    for model, kl_coef in self.kl_models_weights:
+                    for k, (model, kl_coef, half_life) in enumerate(self.kl_models_weights):
+                        if half_life is not None:
+                            kl_coef *= np.exp(np.log(0.5) * self.total_steps / half_life)
                         with torch.no_grad():
-                            # obs = tuple(o.copy() for o in obs) if isinstance(obs, tuple) else obs.copy()
                             dist_other = model.get_action_distribution(obs)
-                        kl_other_models += kl_coef * kl_divergence(dist, dist_other).mean()
+                        div = kl_divergence(dist, dist_other).mean()
+                        tot_kl_other_models[k] += div
+                        tot_kl_coeffs[k] = kl_coef
+                        kl_loss += kl_coef * div
 
-                loss = ((policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss + kl_other_models)
+                loss = ((policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss + kl_loss)
                         / (self.batch_size / self.minibatch_size))
 
                 if not torch.isfinite(loss).all():
@@ -424,7 +434,6 @@ class PPO:
                 tot_entropy_loss += entropy_loss.item()
                 tot_value_loss += value_loss.item()
                 tot_clipped += th.mean((th.abs(ratio - 1) > self.clip_range).float()).item()
-                tot_kl_other_models += kl_other_models
                 n += 1
                 # pb.update(self.minibatch_size)
 
@@ -440,7 +449,8 @@ class PPO:
         assert n > 0
 
         postcompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
-        self.logger.log({
+
+        log_dict = {
             "ppo/loss": tot_loss / n,
             "ppo/policy_loss": tot_policy_loss / n,
             "ppo/entropy_loss": tot_entropy_loss / n,
@@ -449,8 +459,15 @@ class PPO:
             "ppo/clip_fraction": tot_clipped / n,
             "ppo/epoch_time": (t1 - t0) / (1e6 * self.epochs),
             "ppo/update_magnitude": th.dist(precompute, postcompute, p=2),
-            "ppo/kl_other_models": tot_kl_other_models / n,
-        }, step=iteration, commit=False)  # Is committed after when calculating fps
+        }
+
+        if len(self.kl_models_weights) > 0:
+            log_dict.update({f"ppo/kl_div_model_{i}": tot_kl_other_models[i] / n
+                             for i in range(len(self.kl_models_weights))})
+            log_dict.update({f"ppo/kl_coeff_model_{i}": tot_kl_coeffs[i]
+                             for i in range(len(self.kl_models_weights))})
+
+        self.logger.log(log_dict, step=iteration, commit=False)  # Is committed after when calculating fps
 
     def load(self, load_location, continue_iterations=True):
         """

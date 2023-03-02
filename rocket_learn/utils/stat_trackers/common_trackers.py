@@ -41,7 +41,8 @@ class Demos(StatTracker):
     def update(self, gamestates: np.ndarray, mask: np.ndarray):
         players = gamestates[:, StateConstants.PLAYERS]
 
-        demos = players[-1, StateConstants.MATCH_DEMOLISHES] - players[0, StateConstants.MATCH_DEMOLISHES]
+        demos = np.clip(players[-1, StateConstants.MATCH_DEMOLISHES] - players[0, StateConstants.MATCH_DEMOLISHES],
+                        0, None)
         self.total_demos += np.sum(demos)
         self.count += demos.size
 
@@ -218,8 +219,8 @@ class AirTouch(StatTracker):
     def update(self, gamestates: np.ndarray, mask: np.ndarray):
         players = gamestates[:, StateConstants.PLAYERS]
         is_touch = np.asarray([a * b for a, b in
-                              zip(players[:, StateConstants.BALL_TOUCHED],
-                                  np.invert(players[:, StateConstants.ON_GROUND].astype(bool)))])
+                               zip(players[:, StateConstants.BALL_TOUCHED],
+                                   np.invert(players[:, StateConstants.ON_GROUND].astype(bool)))])
 
         self.total_touches += np.sum(is_touch)
         self.count += is_touch.size
@@ -305,13 +306,16 @@ class GoalSpeed(StatTracker):
         self.total_speed = 0
 
     def update(self, gamestates: np.ndarray, mask: np.ndarray):
-        if gamestates.ndim > 1 and len(gamestates) > 1:
-            end = gamestates[-2]
-            goal_speed = end[StateConstants.BALL_LINEAR_VELOCITY]
-            goal_speed = np.linalg.norm(goal_speed)
+        orange_diff = np.diff(gamestates[:, StateConstants.ORANGE_SCORE], append=np.nan)
+        blue_diff = np.diff(gamestates[:, StateConstants.BLUE_SCORE], append=np.nan)
 
-            self.total_speed += goal_speed / 27.78  # convert to km/h
-            self.count += 1
+        goal_frames = (orange_diff > 0) | (blue_diff > 0)
+
+        goal_speed = gamestates[goal_frames, StateConstants.BALL_LINEAR_VELOCITY]
+        goal_speed = np.linalg.norm(goal_speed, axis=-1).sum()
+
+        self.total_speed += goal_speed / 27.78  # convert to km/h
+        self.count += goal_speed.size
 
     def get_stat(self):
         return self.total_speed / (self.count or 1)
@@ -355,3 +359,47 @@ class CarOnGround(StatTracker):
 
     def get_stat(self):
         return 100 * self.total_ground / (self.count or 1)
+
+
+class Saves(StatTracker):
+    def __init__(self):
+        super().__init__("average_saves")
+        self.count = 0
+        self.total_saves = 0
+
+    def reset(self):
+        self.count = 0
+        self.total_saves = 0
+
+    def update(self, gamestates: np.ndarray, mask: np.ndarray):
+        players = gamestates[:, StateConstants.PLAYERS]
+
+        saves = np.clip(players[-1, StateConstants.MATCH_SAVES] - players[0, StateConstants.MATCH_SAVES],
+                        0, None)
+        self.total_saves += np.sum(saves)
+        self.count += saves.size
+
+    def get_stat(self):
+        return self.total_saves / (self.count or 1)
+
+
+class Shots(StatTracker):
+    def __init__(self):
+        super().__init__("average_shots")
+        self.count = 0
+        self.total_shots = 0
+
+    def reset(self):
+        self.count = 0
+        self.total_shots = 0
+
+    def update(self, gamestates: np.ndarray, mask: np.ndarray):
+        players = gamestates[:, StateConstants.PLAYERS]
+
+        shots = np.clip(players[-1, StateConstants.MATCH_SHOTS] - players[0, StateConstants.MATCH_SHOTS],
+                        0, None)
+        self.total_shots += np.sum(shots)
+        self.count += shots.size
+
+    def get_stat(self):
+        return self.total_shots / (self.count or 1)
