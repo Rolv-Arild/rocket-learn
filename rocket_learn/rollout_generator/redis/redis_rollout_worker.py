@@ -173,6 +173,7 @@ class RedisRolloutWorker:
                 else:
                     p = probability_NvsM([rating] * per_team, [target_rating] * per_team)
                 probs[i] = p
+            probs /= probs.sum()
             opponent = np.random.choice(len(probs), p=probs)
             if np.random.random() < 0.5:  # Randomly do blue/orange
                 versions = versions + [opponent] * per_team
