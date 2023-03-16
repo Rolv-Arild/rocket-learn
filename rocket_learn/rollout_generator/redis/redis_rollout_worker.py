@@ -50,7 +50,9 @@ class RedisRolloutWorker:
                  dynamic_gm=True, streamer_mode=False, send_gamestates=True,
                  send_obs=True, scoreboard=None, pretrained_agents=None,
                  human_agent=None, force_paging=False, auto_minimize=True,
-                 local_cache_name=None, gamemode_weights=None, full_team_evaluations=False):
+                 local_cache_name=None, gamemode_weights=None, full_team_evaluations=False,
+                 epic_rl_exe_path=None,
+                 ):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -113,7 +115,9 @@ class RedisRolloutWorker:
         match._state_setter = state_setter
         self.match = match
         self.env = Gym(match=self.match, pipe_id=os.getpid(), launch_preference=LaunchPreference.EPIC,
-                       use_injector=True, force_paging=force_paging, raise_on_crash=True, auto_minimize=auto_minimize)
+                       use_injector=True, force_paging=force_paging, raise_on_crash=True, auto_minimize=auto_minimize,
+                       epic_rl_exe_path=epic_rl_exe_path
+                       )
         self.total_steps_generated = 0
 
     def _get_opponent_ids(self, n_new, n_old, pretrained_choice):
