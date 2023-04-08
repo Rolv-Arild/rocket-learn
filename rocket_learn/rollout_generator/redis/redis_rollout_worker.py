@@ -131,7 +131,8 @@ class RedisRolloutWorker:
         latest_rating = ratings[latest_key]
         keys, values = zip(*ratings.items())
 
-        if n_new == 0 and len(values) >= n_old:  # Evaluation game, try to find agents with high sigma
+        is_eval = (n_new == 0 and len(values) >= n_old)
+        if is_eval:  # Evaluation game, try to find agents with high sigma
             sigmas = np.array([r.sigma for r in values])
             probs = np.clip(sigmas - self.sigma_target, a_min=0, a_max=None)
             s = probs.sum()
@@ -147,7 +148,6 @@ class RedisRolloutWorker:
             if self.full_team_evaluations:
                 versions = versions * per_team
             target_rating = values[versions[0]]
-            n_old -= 1
         elif pretrained_choice is not None:  # pretrained agent chosen, just need index generation
             matchups = np.full((n_new + n_old), -1).tolist()
             for i in range(n_old):
@@ -172,7 +172,7 @@ class RedisRolloutWorker:
                     p = 0  # Don't add more of the same agent in evaluation matches
                 else:
                     p = probability_NvsM([rating] * per_team, [target_rating] * per_team)
-                probs[i] = p
+                probs[i] = p * (1 - p)
             probs /= probs.sum()
             opponent = np.random.choice(len(probs), p=probs)
             if np.random.random() < 0.5:  # Randomly do blue/orange
@@ -188,7 +188,7 @@ class RedisRolloutWorker:
                 probs[i] = (p * (1 - p)) ** ((n_new + n_old) // 2)  # Be less lenient the more players there are
             probs /= probs.sum()
 
-            old_versions = np.random.choice(len(probs), size=n_old, p=probs, replace=True).tolist()
+            old_versions = np.random.choice(len(probs), size=n_old - is_eval, p=probs, replace=True).tolist()
             versions += old_versions
 
             # Then calculate the full matchup, with just permutations of the selected versions (weighted by fairness)
