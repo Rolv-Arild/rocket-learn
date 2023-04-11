@@ -4,8 +4,8 @@ import numpy as np
 import torch
 from rlgym.gym import Gym
 from rlgym.utils.reward_functions.common_rewards import ConstantReward
-from rlgym.utils.state_setters import DefaultState, StateWrapper
-from rlgym.utils.terminal_conditions.common_conditions import GoalScoredCondition
+from rlgym.utils.state_setters import DefaultState
+from tqdm import tqdm
 
 from rocket_learn.agent.policy import Policy
 from rocket_learn.agent.pretrained_policy import HardcodedAgent
@@ -13,10 +13,16 @@ from rocket_learn.experience_buffer import ExperienceBuffer
 from rocket_learn.utils.dynamic_gamemode_setter import DynamicGMSetter
 
 
-def generate_episode(env: Gym, policies, evaluate=False, scoreboard=None) -> (List[ExperienceBuffer], int):
+def generate_episode(env: Gym, policies, evaluate=False, scoreboard=None, progress=False) -> (
+List[ExperienceBuffer], int):
     """
     create experience buffer data by interacting with the environment(s)
     """
+    if progress:
+        progress = tqdm(unit=" steps")
+    else:
+        progress = None
+
     if evaluate:  # Change setup temporarily to play a normal game (approximately)
         from rlgym_tools.extra_terminals.game_condition import GameCondition  # tools is an optional dependency
         terminals = env._match._terminal_conditions  # noqa
@@ -50,6 +56,7 @@ def generate_episode(env: Gym, policies, evaluate=False, scoreboard=None) -> (Li
         for _ in range(sum(latest_policy_indices))
     ]
 
+    b = o = 0
     with torch.no_grad():
         while True:
             all_indices = []
@@ -140,8 +147,21 @@ def generate_episode(env: Gym, policies, evaluate=False, scoreboard=None) -> (Li
                 for exp_buf, obs, act, rew, log_prob in zip(rollouts, old_obs, all_indices, rewards, all_log_probs):
                     exp_buf.add_step(obs, act, rew, done, log_prob, info)
 
+            if progress is not None:
+                progress.update()
+                igt = progress.n * env._match._tick_skip / 120  # noqa
+                prog_str = f"{igt // 60:02.0f}:{igt % 60:02.0f} IGT"
+                if evaluate:
+                    prog_str += f", BLUE {b} - {o} ORANGE"
+                progress.set_postfix_str(prog_str)
+
             if done:
                 result += info["result"]
+                if info["result"] > 0:
+                    b += 1
+                elif info["result"] < 0:
+                    o += 1
+
                 if not evaluate:
                     break
                 elif game_condition.done:  # noqa
@@ -162,5 +182,8 @@ def generate_episode(env: Gym, policies, evaluate=False, scoreboard=None) -> (Li
         env._match._terminal_conditions = terminals  # noqa
         env._match._reward_fn = reward  # noqa
         return result
+
+    if progress is not None:
+        progress.close()
 
     return rollouts, result
