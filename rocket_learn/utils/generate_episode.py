@@ -14,7 +14,7 @@ from rocket_learn.utils.dynamic_gamemode_setter import DynamicGMSetter
 
 
 def generate_episode(env: Gym, policies, evaluate=False, scoreboard=None, progress=False) -> (
-List[ExperienceBuffer], int):
+        List[ExperienceBuffer], int):
     """
     create experience buffer data by interacting with the environment(s)
     """
@@ -150,6 +150,7 @@ List[ExperienceBuffer], int):
             if progress is not None:
                 progress.update()
                 igt = progress.n * env._match._tick_skip / 120  # noqa
+
                 prog_str = f"{igt // 60:02.0f}:{igt % 60:02.0f} IGT"
                 if evaluate:
                     prog_str += f", BLUE {b} - {o} ORANGE"
@@ -174,6 +175,9 @@ List[ExperienceBuffer], int):
     if scoreboard is not None:
         scoreboard.random_resets = random_resets  # noqa Checked above
 
+    if progress is not None:
+        progress.close()
+
     if evaluate:
         if isinstance(env._match._state_setter, DynamicGMSetter):  # noqa
             env._match._state_setter.setter = state_setter  # noqa
@@ -182,8 +186,5 @@ List[ExperienceBuffer], int):
         env._match._terminal_conditions = terminals  # noqa
         env._match._reward_fn = reward  # noqa
         return result
-
-    if progress is not None:
-        progress.close()
 
     return rollouts, result

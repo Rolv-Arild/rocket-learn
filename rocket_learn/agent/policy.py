@@ -2,9 +2,12 @@ from abc import ABC, abstractmethod
 
 from torch import nn
 
-class Policy(nn.Module, ABC):
-    def __init__(self, deterministic=False):
-        super().__init__()
+from rocket_learn.agent.agent import Agent
+
+
+class Policy(Agent, nn.Module, ABC):
+    def __init__(self, identifier, rating, deterministic=False):
+        super().__init__(identifier, rating)
         self.deterministic = deterministic
 
     @abstractmethod

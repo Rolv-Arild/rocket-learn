@@ -4,6 +4,7 @@ from rlgym.utils.gamestates import GameState
 
 
 def encode_gamestate(state: GameState):
+    # TODO instantiate numpy array and set indices instead
     state_vals = [0, state.blue_score, state.orange_score]
     state_vals += state.boost_pads.tolist()
 

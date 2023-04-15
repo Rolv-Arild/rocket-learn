@@ -22,6 +22,7 @@ N_UPDATES = "num-updates"
 MODEL_LATEST = "model-latest"
 VERSION_LATEST = "model-version"
 
+EVALUATIONS = "evaluations"
 ROLLOUTS = "rollout"
 OPPONENT_MODELS = "opponent-models"
 WORKER_IDS = "worker-ids"

@@ -2,12 +2,13 @@ from abc import ABC, abstractmethod
 from typing import Tuple
 from torch import nn
 
+from rocket_learn.agent.agent import Agent
 from rocket_learn.agent.discrete_policy import DiscretePolicy
 
 from rlgym.utils.gamestates import GameState
 
 
-class HardcodedAgent(ABC):
+class HardcodedAgent(Agent, ABC):
     """
         An external bot prebuilt and imported to be trained against
     """
