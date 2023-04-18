@@ -2,10 +2,8 @@ from abc import ABC, abstractmethod
 
 from torch import nn
 
-from rocket_learn.agent.agent import Agent
 
-
-class Policy(Agent, nn.Module, ABC):
+class Policy(nn.Module, ABC):
     def __init__(self, identifier, rating, deterministic=False):
         super().__init__(identifier, rating)
         self.deterministic = deterministic
@@ -28,5 +26,5 @@ class Policy(Agent, nn.Module, ABC):
     @abstractmethod
     def entropy(distribution, selected_action): raise NotImplementedError
 
-    @abstractmethod
-    def env_compatible(self, action): raise NotImplementedError
+    # @abstractmethod
+    # def env_compatible(self, action): raise NotImplementedError
