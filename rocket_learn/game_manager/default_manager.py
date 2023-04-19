@@ -1,19 +1,17 @@
-from typing import Dict, Literal, Any
+from typing import Dict, Literal, Tuple, List, Iterable
 
 import numpy as np
-from pettingzoo import ParallelEnv
-from rlgym.utils.gamestates import GameState
 
 from rocket_learn.agent.agent import Agent
-from rocket_learn.agent.policy import Policy
-from rocket_learn.agent.pretrained_policy import HardcodedAgent
-from rocket_learn.experience_buffer import ExperienceBuffer
+from rocket_learn.envs.rocket_league import RocketLeague
 from rocket_learn.game_manager.game_manager import GameManager
+
+DefaultMatchup = Tuple[Dict[str, str], Dict[str, Agent]]
 
 
 class DefaultManager(GameManager):
     def __init__(self,
-                 env: ParallelEnv,
+                 env: RocketLeague,
                  gamemode_weights: dict[str, float],
                  display: Literal[None, "stochastic", "deterministic", "rollout"] = None):
         super(DefaultManager, self).__init__(env)
@@ -22,71 +20,77 @@ class DefaultManager(GameManager):
         self.gamemode_exp = {k: 0 for k in gamemode_weights.keys()}
         self.gamemode_weights = gamemode_weights
 
-    def generate_matchup(self) -> (Dict[str, Agent], int):
+    def generate_matchup(self) -> Tuple[DefaultMatchup, int]:
         raise NotImplementedError
 
-    @staticmethod
-    def _infer(car_identifer: Dict[str, str], identifier_agent: Dict[str, Agent],
-               observations: Dict[str, Any], info: Dict[str, Any]):
-        all_actions = {}
-
-        # identifier_model = {}
-        identifier_cars = {}
-        for car, identifier in car_identifer.items():
-            identifier_cars.setdefault(identifier, []).append(car)
-            # identifier_model[identifier] = model
-
-        for identifier, cars in identifier_cars.items():
-            agent = identifier_agent[identifier]
-
-            if agent.is_multi:
-                actions = agent.act({car: observations[car] for car in cars})
-            else:
-                actions = [agent.act({car: observations[car]}) for car in cars]
-
-            all_actions = dict(zip(cars, actions))
-
-        return all_actions
-
-    def _episode(self, agent_policy: Dict[str, Agent]):
-        obs, info = self.env.reset(return_info=True)
+    def _episode(self, car_identifier, identifier_agent):
+        observations, info = self.env.reset()
         all_states = [self.env.state()]
 
+        identifier_cars = {}
+        for car, identifier in car_identifier.items():
+            identifier_cars.setdefault(identifier, set()).add(car)
+
+        total_agent_steps = 0
+
+        removed_cars = set()
         while True:
-            all_actions = self._infer(agent_policy, obs, info)
+            # Select actions
+            all_actions = {}
+            for identifier, cars in identifier_cars.items():
+                agent = identifier_agent[identifier]
 
-            observation, reward, terminated, truncated, info = self.env.step(all_actions)
+                actions = agent.act({car: observations[car] for car in cars})
 
-            all_states.append(self.env.state())
+                all_actions.update(actions)
 
-            if any(terminated.values()) or any(truncated.values()):
+            # Step
+            observations, rewards, terminated, truncated, info = self.env.step(all_actions)
+            total_agent_steps *= len(self.env.agents)
+
+            state = self.env.state()
+            all_states.append(state)
+
+            # Remove agents that are terminated or truncated
+            for car in self.env.agents:
+                ended = {}
+                if terminated[car] or truncated[car]:
+                    identifier = car_identifier[car]
+                    ended.setdefault(identifier, {}).update({car: truncated[car]})
+                    removed_cars.add(car)
+
+                for identifier, truncs in ended.items():
+                    agent = identifier_agent[identifier]
+                    agent.end(state, truncs)
+
+            # End if there are no agents left
+            if not self.env.agents:
                 break
 
-        return all_states
+        return all_states, total_agent_steps
 
-    def rollout(self, car_agent: Dict[str, Agent]) -> tuple[list[np.ndarray], dict]:
-        states, buffers = self._episode(agent_policy)
+    def rollout(self, matchup: DefaultMatchup):
+        car_identifier, identifier_agent = matchup
+        states, steps = self._episode(car_identifier, identifier_agent)
 
-        steps = sum(b.size() for b in buffers.values())
-        mode = self._get_gamemode(agent_policy)
+        steps = len(states) * len(states[0])
+        mode = self._get_gamemode(car_identifier.keys())
         self.gamemode_exp[mode] += steps
 
-        return states, buffers
+    def evaluate(self, matchup: DefaultMatchup) -> int:
+        pass  # TODO, how do we handle scoreboard?
 
-    def evaluate(self, agent_policy: Dict[str, Agent]) -> int:
-        pass  # TODO
-
-    def show(self, agent_policy: Dict[str, Agent]):
-        states, buffers = self._episode(agent_policy)
+    def show(self, matchup: DefaultMatchup):
+        states, steps = self._episode(*matchup)
 
         steps = len(states)
-        mode = self._get_gamemode(agent_policy)
+        mode = self._get_gamemode(matchup[0].keys())
         self.gamemode_exp[mode] += steps
 
     @staticmethod
-    def _get_gamemode(agent_policy: Dict[str, Agent]):
+    def _get_gamemode(cars: Iterable[str]):
         b = o = 0
-        for key in agent_policy.keys():
+        for key in cars:
             if key.startswith("blue-"):
                 b += int(key.replace("blue-", ""))
             else:

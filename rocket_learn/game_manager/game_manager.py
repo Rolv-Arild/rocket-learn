@@ -1,9 +1,9 @@
 from abc import ABC
-from typing import Dict
+from typing import Dict, Tuple, Any, List
 
+import numpy as np
 from pettingzoo import ParallelEnv
 
-from rocket_learn.agent.agent import Agent
 from rocket_learn.experience_buffer import ExperienceBuffer
 
 
@@ -15,14 +15,26 @@ class GameManager(ABC):
     def __init__(self, env: ParallelEnv):
         self.env = env
 
-    def generate_matchup(self) -> (Dict[str, Agent], int):
+    def generate_matchup(self) -> Tuple[Any, int]:
         raise NotImplementedError
 
-    def rollout(self, agent_policy: Dict[str, Agent]) -> Dict[str, ExperienceBuffer]:
+    def rollout(self, matchup: Any):
         raise NotImplementedError
 
-    def evaluate(self, agent_policy: Dict[str, Agent]) -> int:
+    def evaluate(self, matchup: Any):
         raise NotImplementedError
 
-    def show(self, agent_policy: Dict[str, Agent]):
+    def show(self, matchup: Any):
         raise NotImplementedError
+
+    def run(self):
+        while True:
+            matchup, matchup_type = self.generate_matchup()
+            if matchup_type == GameManager.SHOW:
+                self.show(matchup)
+            elif matchup_type == GameManager.ROLLOUT:
+                self.evaluate(matchup)
+            elif matchup_type == GameManager.EVAL:
+                self.show(matchup)
+            else:
+                raise ValueError("Invalid matchup type")

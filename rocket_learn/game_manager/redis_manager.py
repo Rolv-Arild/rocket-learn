@@ -1,14 +1,13 @@
 import functools
-from typing import Dict, Literal
+from typing import Literal, Tuple
 
 import numpy as np
-from pettingzoo import ParallelEnv
 from redis import Redis
-from trueskill import quality
 
 from rocket_learn.agent.agent import Agent
 from rocket_learn.agent.policy import Policy
-from rocket_learn.game_manager.default_manager import DefaultManager
+from rocket_learn.envs.rocket_league import RocketLeague
+from rocket_learn.game_manager.default_manager import DefaultManager, DefaultMatchup
 from rocket_learn.rollout_generator.redis.utils import VERSION_LATEST, MODEL_LATEST, OPPONENT_MODELS, \
     _unserialize_model, get_rating, LATEST_RATING_ID
 from rocket_learn.utils.util import probability_NvsM
@@ -16,7 +15,7 @@ from rocket_learn.utils.util import probability_NvsM
 
 class RedisManager(DefaultManager):
     def __init__(self,
-                 env: ParallelEnv,
+                 env: RocketLeague,
                  redis: Redis,
                  past_model_prob: float,
                  eval_prob: float,
@@ -46,8 +45,33 @@ class RedisManager(DefaultManager):
                 );
             """)
 
+    def _determine_gamemode(self):
+        modes = list(self.gamemode_weights.keys())
+        target_dist = np.array(list(self.gamemode_weights.values()))
+        target_dist = target_dist / target_dist.sum()
+
+        current_dist = np.array([self.gamemode_exp[k] for k in modes])
+
+        assert (target_dist > 0).all()
+
+        diff = current_dist - target_dist
+        # Index will be random between ties of lowest diff
+        idx = np.random.choice(np.where(diff == diff.min())[0])
+
+        mode = modes[idx]
+
+        # In theory 1v2 == 2v1, we let user decide on one as a name then we swap randomly
+        b, o = mode.split("v")
+        b = int(b)
+        o = int(o)
+        if o != b and np.random.random() > 0.5:
+            b, o = o, b
+
+        return mode, b, o
+
     @functools.lru_cache(maxsize=8)
     def _get_agent(self, identifier: str):
+        # TODO update to return an Agent object instead of a Policy
         if self.sql is not None:
             models = self.sql.execute("SELECT parameters FROM MODELS WHERE id == ?", (identifier,)).fetchall()
             if len(models) == 0:
@@ -72,28 +96,6 @@ class RedisManager(DefaultManager):
 
         return model
 
-    def _determine_gamemode(self):
-        modes = list(self.gamemode_weights.keys())
-        target_dist = np.array(list(self.gamemode_weights.values()))
-        target_dist = target_dist / target_dist.sum()
-
-        current_dist = np.array([self.gamemode_exp[k] for k in modes])
-
-        assert (target_dist > 0).all()
-
-        diff = current_dist - target_dist
-        idx = np.random.choice(np.where(diff == diff.min())[0])
-
-        mode = modes[idx]
-
-        b, o = mode.split("v")
-        b = int(b)
-        o = int(o)
-        if o != b and np.random.random() > 0.5:
-            b, o = o, b
-
-        return mode, b, o
-
     def _get_matchup_latest(self, deterministic):
         latest_model = _unserialize_model(self.redis.get(MODEL_LATEST))
         latest_model.deterministic = deterministic
@@ -106,15 +108,18 @@ class RedisManager(DefaultManager):
 
         return cars_models
 
-    def _get_matchup_eval(self):
+    def _get_matchup_eval(self):  # TODO somehow push the result of eval matches to redis
+        # Assume equal gamemode importance, maybe select based on sigma in future?
         gamemode = np.random.choice(self.gamemode_weights.keys())
         all_ratings = get_rating(gamemode, None, self.redis)
 
         identifiers, ratings = zip(*all_ratings.items())
+
+        # Select target rating, aim for high sigma
         probs = np.array([r.sigma for r in ratings])
         probs = np.clip(probs - self.target_sigma, 0)
         s = probs.sum()
-        if s <= 0:
+        if s <= 0:  # TODO let users pick a different probability if no models have low sigma?
             probs[:] = 1
             s = len(probs)
         probs /= s
@@ -123,13 +128,15 @@ class RedisManager(DefaultManager):
         target_identifier = identifiers[target_idx]
         target_rating = ratings[target_idx]
 
+        # Imbalanced modes are not entirely thought through but might not crash at least
         b, o = (int(v) for v in gamemode.split("v"))
         if b != o and np.random.random() < 0.5:
             b, o = o, b
 
+        # Weight opponents by likelihood of winning one game each in two games
         probs = np.zeros(len(ratings))
         for idx, rating in enumerate(ratings):
-            if idx != target_idx:
+            if idx != target_idx:  # Keep target at 0, no matchups against itself
                 p = probability_NvsM(b * [target_rating], o * [rating])
                 probs[idx] = p * (1 - p)
         s = probs.sum()
@@ -138,28 +145,32 @@ class RedisManager(DefaultManager):
         probs /= s
 
         if self.full_team_evals:
+            # Select a single opponent
+            if len(ratings) < 2:
+                return None
             opponent_idx = np.random.choice(len(ratings), p=probs)
             opponent_identifier = identifiers[opponent_idx]
             opponent_rating = ratings[opponent_idx]
 
-            a1: Agent = self._get_agent(target_identifier)
-            a2: Agent = self._get_agent(opponent_identifier)
+            target_agent: Agent = self._get_agent(target_identifier)
+            opponent_agent: Agent = self._get_agent(opponent_identifier)
 
-            a1.rating = target_rating
-            a2.rating = opponent_rating
+            identifier_agent = {target_identifier: target_agent,
+                                opponent_identifier: opponent_agent}
+            identifier_rating = {target_identifier: target_rating,
+                                 opponent_identifier: opponent_rating}
 
-            a1.identifier = target_identifier
-            a2.identifier = opponent_identifier
+            ids = [target_identifier, opponent_identifier]
+            np.random.shuffle(ids)
 
-            if b == o and np.random.random() < 0.5:
-                a1, a2 = a2, a1
-
-            cars_models = {f"{color}-{n}": model
-                           for color, model in (("blue", a1), ("orange", a2))
-                           for n in range(b if color == 'blue' else o)}
-            return cars_models
+            car_identifier = {f"{color}-{n}": identifier
+                              for color, identifier in (("blue", ids[0]), ("orange", ids[1]))
+                              for n in range(b if color == 'blue' else o)}
         else:
-            opponent_idx = np.random.choice(len(ratings), p=probs, size=b + o - 1).tolist()
+            # Select several random opponents
+            if len(ratings) < b + o:
+                return None
+            opponent_idx = np.random.choice(len(ratings), p=probs, size=b + o - 1, replace=False).tolist()
 
             cars = [f"{color}-{n}"
                     for color in ("blue", "orange")
@@ -168,16 +179,19 @@ class RedisManager(DefaultManager):
             opponent_idx.append(target_idx)
             np.random.shuffle(opponent_idx)
 
-            cars_models = {}
+            car_identifier = {}
+            identifier_agent = {}
+            identifier_rating = {}
             for car, idx in zip(cars, opponent_idx):
                 identifier = identifiers[idx]
                 rating = ratings[idx]
-                agent = self._get_agent(identifier)
-                agent.identifier = identifier
-                agent.rating = rating
-                cars_models[car] = agent
 
-            return cars_models
+                car_identifier[car] = identifier
+                if identifier not in identifier_agent:
+                    identifier_agent[identifier] = self._get_agent(identifier)
+                    identifier_rating[identifier] = rating
+
+        return car_identifier, identifier_agent, identifier_rating
 
     def _get_matchup_rollout(self):
         mode, b, o = self._determine_gamemode()
@@ -194,6 +208,10 @@ class RedisManager(DefaultManager):
         latest_agent = self.redis.get(MODEL_LATEST)
         latest_identifier = self.redis.get(VERSION_LATEST)
 
+        car_identifier = {}
+        identifier_agent = {latest_identifier: latest_agent}
+        identifier_rating = {latest_identifier: latest_rating}
+
         probs = np.zeros(len(ratings))
         for idx, rating in enumerate(ratings):
             p = probability_NvsM(b * [latest_rating], o * [rating])
@@ -209,34 +227,38 @@ class RedisManager(DefaultManager):
         selected_ratings = n_new * [latest_rating] + [ratings[i] for i in idx]
 
         # Shuffle
-        idx = np.random.choice(len(selected_identifiers), size=len(selected_identifiers), replace=False)
+        idx = np.random.permutation(len(selected_identifiers))
 
         cars = [f"{color}-{n}"
                 for color in ("blue", "orange")
                 for n in range(b if color == 'blue' else o)]
 
-        cars_models = {}
         for car, i in zip(cars, idx):
             identifier = selected_identifiers[i]
             rating = selected_ratings[i]
-            if identifier == latest_identifier:
-                agent = latest_agent
-            else:
-                agent = self._get_agent(identifier)
-            agent.identifier = identifier
-            agent.rating = rating
-            cars_models[car] = agent
 
-        return cars_models
+            car_identifier[car] = identifier
+            if identifier not in identifier_agent:
+                identifier_agent[identifier] = self._get_agent(identifier)
+                identifier_rating[identifier] = rating
 
-    def generate_matchup(self) -> (Dict[str, Agent], int):
+        return car_identifier, identifier_agent, identifier_rating
+
+    def generate_matchup(self) -> Tuple[DefaultMatchup, int]:
         if self.eval_prob < np.random.random():
-            cars_models = self._get_matchup_eval()
-            return cars_models, self.EVAL
+            car_identifier, identifier_agent, identifier_rating = \
+                self._get_matchup_eval()
+            matchup_type = self.EVAL
         elif self.display in ("stochastic", "deterministic") \
                 or self.past_model_prob < np.random.random():
-            cars_models = self._get_matchup_latest(self.display == "deterministic")
-            return cars_models, self.SHOW if self.display else self.ROLLOUT
+            car_identifier, identifier_agent, identifier_rating = \
+                self._get_matchup_latest(self.display == "deterministic")
+            matchup_type = self.SHOW if self.display else self.ROLLOUT
         else:
-            cars_models = self._get_matchup_rollout()
-            return cars_models, self.SHOW if self.display else self.ROLLOUT
+            car_identifier, identifier_agent, identifier_rating \
+                = self._get_matchup_rollout()
+            matchup_type = self.SHOW if self.display else self.ROLLOUT
+
+        # TODO print matchup with ratings? Or should worker be in charge of that?
+
+        return (car_identifier, identifier_agent), matchup_type

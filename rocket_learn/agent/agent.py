@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import Union, Any
+from typing import Union, Any, Dict, Set
 
 import numpy as np
 import torch
@@ -17,34 +17,24 @@ from rocket_learn.rollout_generator.redis.utils import _serialize, encode_buffer
 
 
 class Agent:
-    def __init__(self, is_multi: bool):
-        self._is_multi = is_multi
-
-    @property
-    def is_multi(self):
-        return self._is_multi
-
-    def reset(self, *args, **kwargs):
+    def reset(self, initial_state: Any, agents: Set[str]):
         raise NotImplementedError
 
-    def act(self, *args, **kwargs) -> Any:
+    def act(self, agents_observations: Dict[str, Any]) -> Dict[str, Any]:
         raise NotImplementedError
 
-    def end(self, *args, **kwargs):
+    def end(self, final_state: Any, truncated: Dict[str, bool]):
         raise NotImplementedError
 
 
 class RLAgent(Agent):
-    def __init__(self, is_multi: bool):
-        super().__init__(is_multi)
-
-    def reset(self, initial_state: GameState):
+    def reset(self, initial_state: GameState, agents: Set[str]):
         raise NotImplementedError
 
-    def act(self, state: GameState, cars: Union[str, list[str]]):
+    def act(self, agents_observations: Dict[str, Any]) -> Dict[str, Any]:
         raise NotImplementedError
 
-    def end(self, final_state: GameState):
+    def end(self, final_state: GameState, truncated: Dict[str, bool]):
         raise NotImplementedError
 
 
@@ -65,7 +55,7 @@ class TorchAgent(RLAgent, ABC):
     def parse_actions(self, actions: Any, state: GameState):
         raise NotImplementedError
 
-    def reset(self, initial_state: GameState):
+    def reset(self, initial_state: GameState, agents: Set[str]):
         car_to_index = {}
         b = o = 0
         for i, player in enumerate(initial_state.players):
@@ -77,7 +67,7 @@ class TorchAgent(RLAgent, ABC):
                 o += 1
             car_to_index = {player_car: b + o - 1}
         self._car_to_index = car_to_index
-        self._experience_buffers = {c: ExperienceBuffer() for c in car_to_index}
+        self._experience_buffers = {c: ExperienceBuffer() for c in agents}
 
     def run_model(self, all_obs):
         dists = self.policy.get_action_distribution(all_obs)
@@ -86,11 +76,10 @@ class TorchAgent(RLAgent, ABC):
 
         return action_indices, log_probs
 
-    def act(self, state: GameState, cars: Union[str, set[str]]) -> dict[str, np.ndarray]:
-        if isinstance(cars, str):
-            cars = {cars}
-
-        cars = list(cars)
+    def act(self, agents_observations: Dict[str, GameState]) -> Dict[str, np.ndarray]:
+        cars = list(agents_observations.keys())
+        # The assumption is that all cars will share the same object
+        state = next(iter(agents_observations.values()))
 
         all_obs = self.build_observations(state, cars)
         all_rewards = self.assign_rewards(state, cars)
@@ -114,11 +103,57 @@ class TorchAgent(RLAgent, ABC):
 
         return dict(zip(cars, actions))
 
+    def end(self, final_state: GameState, truncated: Dict[str, bool]):
+        for car, exp_buffer in self._experience_buffers.items():
+            exp_buffer: ExperienceBuffer
+            if truncated[car]:
+                exp_buffer.truncated[-1] = True
+            else:
+                exp_buffer.terminated[-1] = True
 
-class RLAgentWithConfig(TorchAgent):
+
+def send_experience_buffers(redis: Redis, identifiers: list[str], experience_buffers: list[ExperienceBuffer],
+                            send_obs: bool, send_states: bool):
+    rollout_data = encode_buffers(experience_buffers,
+                                  return_obs=send_obs,
+                                  return_states=send_states,
+                                  return_rewards=True)
+    # sanity_check = decode_buffers(rollout_data, versions,
+    #                               has_obs=False, has_states=True, has_rewards=True,
+    #                               obs_build_factory=lambda: self.match._obs_builder,
+    #                               rew_func_factory=lambda: self.match._reward_fn,
+    #                               act_parse_factory=lambda: self.match._action_parser)
+    rollout_bytes = _serialize((rollout_data, identifiers,
+                                send_obs, send_states, True))
+
+    # TODO async communication?
+
+    n_items = redis.rpush(ROLLOUTS, rollout_bytes)
+    if n_items >= 1000:
+        print("Had to limit rollouts. Learner may have have crashed, or is overloaded")
+        redis.ltrim(ROLLOUTS, -100, -1)
+
+
+class RedisAgent(TorchAgent, ABC):
     def __init__(self, policy: Policy,
-                 obs_builder: ObsBuilder, reward_function: RewardFunction, action_parser: ActionParser):
+                 redis: Redis, send_obs: bool = True, send_states: bool = True):
         super().__init__(policy)
+        self.redis = redis
+
+        self.send_obs = send_obs
+        self.send_states = send_states
+
+    def end(self, final_state: Any, truncated: Dict[str, bool]):
+        buffers = list(self._experience_buffers.values())
+        identifiers = [self.identifier] * len(buffers)  # TODO get identifier here somehow
+        send_experience_buffers(self.redis, identifiers, buffers, self.send_obs, self.send_states)
+
+
+class RLAgentWithConfig(RedisAgent):
+    def __init__(self, policy: Policy, redis: Redis,
+                 obs_builder: ObsBuilder, reward_function: RewardFunction, action_parser: ActionParser,
+                 send_obs: bool = True, send_states: bool = True):
+        super().__init__(policy, redis, send_obs, send_states)
         self.obs_builder = obs_builder
         self.reward_function = reward_function
         self.action_parser = action_parser
@@ -160,78 +195,10 @@ class RLAgentWithConfig(TorchAgent):
     def parse_actions(self, actions: Any, state: GameState):
         return self.action_parser.parse_actions(actions, state)
 
-    def reset(self, initial_state: GameState):
+    def reset(self, initial_state: Any, agents: Set[str]):
         self.obs_builder.reset(initial_state)
         self.reward_function.reset(initial_state)
-        super(RLAgentWithConfig, self).reset(initial_state)
+        super(RLAgentWithConfig, self).reset(initial_state, agents)
 
-    def end(self, final_state: GameState):
+    def end(self, final_state: Any, truncated: Dict[str, bool]):
         raise NotImplementedError
-
-
-def send_experience_buffers(redis: Redis, identifiers: list[str], experience_buffers: list[ExperienceBuffer],
-                            send_obs: bool, send_states: bool):
-    rollout_data = encode_buffers(experience_buffers,
-                                  return_obs=send_obs,
-                                  return_states=send_states,
-                                  return_rewards=True)
-    # sanity_check = decode_buffers(rollout_data, versions,
-    #                               has_obs=False, has_states=True, has_rewards=True,
-    #                               obs_build_factory=lambda: self.match._obs_builder,
-    #                               rew_func_factory=lambda: self.match._reward_fn,
-    #                               act_parse_factory=lambda: self.match._action_parser)
-    rollout_bytes = _serialize((rollout_data, identifiers,
-                                send_obs, send_states, True))
-
-    # TODO async communication?
-
-    n_items = redis.rpush(ROLLOUTS, rollout_bytes)
-    if n_items >= 1000:
-        print("Had to limit rollouts. Learner may have have crashed, or is overloaded")
-        redis.ltrim(ROLLOUTS, -100, -1)
-
-
-class RedisAgent(RLAgentWithConfig):
-    def __init__(self, policy: Policy,
-                 obs_builder: ObsBuilder, reward_function: RewardFunction, action_parser: ActionParser,
-                 redis: Redis, send_obs: bool = True, send_states: bool = True):
-        super().__init__(policy, obs_builder, reward_function, action_parser)
-        self.redis = redis
-
-        self.send_obs = send_obs
-        self.send_states = send_states
-
-    def _load_policy(self, identifier=None):
-        if identifier is None:
-            identifier = self._identifier
-        agent, version, mode = identifier.split("-")
-        if mode == "live":
-            latest = self.redis.get(VERSION_LATEST)
-            policy = _unserialize_model(self.redis.hget(MODEL_LATEST, agent))
-        else:
-            policy = _unserialize_model(self.redis.hget(OPPONENT_MODELS, identifier))
-            if mode == "stochastic":
-            elif mode == "deterministic":
-        self.policy = policy
-
-    @property
-    def identifier(self):
-        return self._identifier
-
-    @identifier.setter
-    def identifier(self, value):
-        if self._identifier != value:
-            self._load_policy(value)
-
-    def end(self, final_state: GameState):
-        buffers = list(self._experience_buffers.values())
-        identifiers = [self.identifier] * len(buffers)
-        send_experience_buffers(self.redis, identifiers, buffers, self.send_obs, self.send_states)
-
-class LiveAgent(RedisAgent):
-
-
-class FixedAgent(RedisAgent):
-
-    def end(self, final_state: GameState):
-        pass

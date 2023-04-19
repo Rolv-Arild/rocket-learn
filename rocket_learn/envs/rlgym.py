@@ -23,6 +23,9 @@ class GameStateObs(ObsBuilder):
     def build_obs(self, player: PlayerData, state: GameState, previous_action: np.ndarray) -> Any:
         return state
 
+    def get_obs_space(self):
+        return False  # RLGym checks for None in auto detect
+
 
 class NoReward(RewardFunction):
     def reset(self, initial_state: GameState):
@@ -60,7 +63,7 @@ class RLGym(RocketLeague):
 
     @classmethod
     def make(cls, *args, **kwargs):
-        return cls(rlgym.make(*args, **kwargs))
+        return cls(*args, **kwargs)
 
     def reset(self, seed: Optional[int] = None, return_info: bool = False, options: Optional[dict] = None) -> ObsDict:
         self._env.update_settings(game_speed=options.get("game_speed", None),
@@ -90,7 +93,7 @@ class RLGym(RocketLeague):
         pass
 
     def is_truncated(self, state):
-        for condition in self._env._match._terminal_conditions:  # noqa
+        for condition in self.terminal_conditions:
             if isinstance(condition, TerminalTruncatedCondition) \
                     and condition.is_truncated(state):
                 return True
@@ -108,11 +111,13 @@ class RLGym(RocketLeague):
 
         obs = dict(zip(self.agents, obs))
         reward = dict(zip(self.agents, reward))
-        done = {a: done for a in self.agents}
+        terminated = {a: done for a in self.agents}
         truncated = {a: truncated for a in self.agents}
         info = {a: info for a in self.agents}
 
-        return obs, reward, done, truncated, info
+        self.agents = [a for a in self.agents if not (terminated[a] or truncated[a])]
+
+        return obs, reward, terminated, truncated, info
 
     def state(self) -> np.ndarray:
         return encode_gamestate(self._state)
