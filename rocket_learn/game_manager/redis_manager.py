@@ -15,9 +15,17 @@ from rocket_learn.utils.util import probability_NvsM
 
 
 class RedisManager(DefaultManager):
-    def __init__(self, env: ParallelEnv, redis: Redis, past_model_prob: float, eval_prob: float,
-                 gamemode_weights, local_cache=None, full_team_evals=True, target_sigma=1):
-        super().__init__(env)
+    def __init__(self,
+                 env: ParallelEnv,
+                 redis: Redis,
+                 past_model_prob: float,
+                 eval_prob: float,
+                 gamemode_weights: dict[str, float],
+                 display: Literal[None, "stochastic", "deterministic", "rollout"] = None,
+                 local_cache=None,
+                 full_team_evals=True,
+                 target_sigma=1):
+        super().__init__(env, gamemode_weights, display)
         self.redis = redis
 
         self.past_model_prob = past_model_prob

@@ -17,27 +17,12 @@ from rocket_learn.rollout_generator.redis.utils import _serialize, encode_buffer
 
 
 class Agent:
-    def __init__(self, identifier: str, rating: Rating, is_multi: bool):
-        self._identifier = identifier
-        self._rating = rating
+    def __init__(self, is_multi: bool):
         self._is_multi = is_multi
 
     @property
     def is_multi(self):
         return self._is_multi
-
-    @property
-    def identifier(self):
-        return self._identifier
-
-    @identifier.setter
-    def identifier(self, value):
-        self._identifier = value
-
-    @property
-    def rating(self):
-        return Rating(self._rating.mu,
-                      self._rating.sigma)
 
     def reset(self, *args, **kwargs):
         raise NotImplementedError
@@ -50,8 +35,8 @@ class Agent:
 
 
 class RLAgent(Agent):
-    def __init__(self, identifier: str, rating: Rating, is_multi: bool):
-        super().__init__(identifier, rating, is_multi)
+    def __init__(self, is_multi: bool):
+        super().__init__(is_multi)
 
     def reset(self, initial_state: GameState):
         raise NotImplementedError
@@ -64,8 +49,8 @@ class RLAgent(Agent):
 
 
 class TorchAgent(RLAgent, ABC):
-    def __init__(self, identifier: str, rating: Rating, policy: Policy):
-        super().__init__(identifier, rating, True)
+    def __init__(self, policy: Policy):
+        super().__init__(True)
         self.policy = policy
         self._previous_actions = {}
         self._car_to_index = {}
@@ -131,9 +116,9 @@ class TorchAgent(RLAgent, ABC):
 
 
 class RLAgentWithConfig(TorchAgent):
-    def __init__(self, identifier: str, rating: Rating, policy: Policy,
+    def __init__(self, policy: Policy,
                  obs_builder: ObsBuilder, reward_function: RewardFunction, action_parser: ActionParser):
-        super().__init__(identifier, rating, policy)
+        super().__init__(policy)
         self.obs_builder = obs_builder
         self.reward_function = reward_function
         self.action_parser = action_parser
@@ -207,10 +192,10 @@ def send_experience_buffers(redis: Redis, identifiers: list[str], experience_buf
 
 
 class RedisAgent(RLAgentWithConfig):
-    def __init__(self, identifier, rating, policy: Policy,
+    def __init__(self, policy: Policy,
                  obs_builder: ObsBuilder, reward_function: RewardFunction, action_parser: ActionParser,
                  redis: Redis, send_obs: bool = True, send_states: bool = True):
-        super().__init__(identifier, rating, policy, obs_builder, reward_function, action_parser)
+        super().__init__(policy, obs_builder, reward_function, action_parser)
         self.redis = redis
 
         self.send_obs = send_obs

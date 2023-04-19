@@ -1,22 +1,61 @@
-from typing import Optional, Tuple, Dict, Union, List
+from typing import Optional, Tuple, Dict, Union, List, Any
 
 import gymnasium
 import numpy as np
 import rlgym
 from pettingzoo.utils.env import ObsDict, ActionDict
+from rlgym.gamelaunch import LaunchPreference
 from rlgym.gym import Gym
+from rlgym.utils import StateSetter, RewardFunction, ObsBuilder, TerminalCondition
+from rlgym.utils.action_parsers import ActionParser, DefaultAction
 from rlgym.utils.common_values import BLUE_TEAM
-from rlgym.utils.gamestates import GameState
+from rlgym.utils.gamestates import GameState, PlayerData
 
 from rocket_learn.envs.rocket_league import RocketLeague
 from rocket_learn.utils.truncation import TerminalTruncatedCondition
 from rocket_learn.utils.gamestate_encoding import encode_gamestate
 
 
+class GameStateObs(ObsBuilder):
+    def reset(self, initial_state: GameState):
+        pass
+
+    def build_obs(self, player: PlayerData, state: GameState, previous_action: np.ndarray) -> Any:
+        return state
+
+
+class NoReward(RewardFunction):
+    def reset(self, initial_state: GameState):
+        pass
+
+    def get_reward(self, player: PlayerData, state: GameState, previous_action: np.ndarray) -> float:
+        return 0
+
+
 class RLGym(RocketLeague):
-    def __init__(self, env: Gym):
+    def __init__(self,
+                 tick_skip,
+                 terminal_conditions,
+                 state_setter,
+                 # By default, the Agent class parses actions, builds observations and assigns rewards
+                 action_parser=DefaultAction(),
+                 obs_builder=GameStateObs(),
+                 reward_fn=NoReward(),
+                 game_speed=100,
+                 spawn_opponents=True,
+                 team_size=3,
+                 gravity=1,
+                 boost_consumption=1,
+                 launch_preference=LaunchPreference.EPIC,
+                 force_paging=False,
+                 auto_minimize=True):
         super().__init__(blue=env._match._team_size, orange=env._match._team_size)  # noqa
-        self._env = env
+        self._env = rlgym.make(game_speed=game_speed, tick_skip=tick_skip, spawn_opponents=spawn_opponents,
+                               team_size=team_size, gravity=gravity, boost_consumption=boost_consumption,
+                               terminal_conditions=terminal_conditions, reward_fn=reward_fn, obs_builder=obs_builder,
+                               action_parser=action_parser, state_setter=state_setter,
+                               launch_preference=launch_preference, use_injector=True, force_paging=force_paging,
+                               raise_on_crash=True, auto_minimize=auto_minimize)
         self._state = None
 
     @classmethod
@@ -116,3 +155,55 @@ class RLGym(RocketLeague):
     @boost_consumption.setter
     def boost_consumption(self, value):
         self._env.update_settings(boost_consumption=value)
+
+    @property
+    def tick_skip(self):
+        return self._env._match._tick_skip  # noqa
+
+    @property
+    def terminal_conditions(self):
+        return self._env._match._terminal_conditions  # noqa
+
+    @terminal_conditions.setter
+    def terminal_conditions(self, *terminal_condition: TerminalCondition):
+        self._env._match._terminal_conditions = list(terminal_condition)  # noqa
+
+    @property
+    def reward_fn(self):
+        return self._env._match._reward_fn  # noqa
+
+    @reward_fn.setter
+    def reward_fn(self, reward_fn: RewardFunction):
+        self._env._match._reward_fn = reward_fn  # noqa
+
+    @property
+    def obs_builder(self):
+        return self._env._match._obs_builder  # noqa
+
+    @obs_builder.setter
+    def obs_builder(self, obs_builder: ObsBuilder):
+        self._env._match._obs_builder = obs_builder  # noqa
+
+    @property
+    def action_parser(self):
+        return self._env._match._action_parser  # noqa
+
+    @action_parser.setter
+    def action_parser(self, action_parser: ActionParser):
+        self._env._match._action_parser = action_parser  # noqa
+
+    @property
+    def state_setter(self):
+        return self._env._match._state_setter  # noqa
+
+    @state_setter.setter
+    def state_setter(self, state_setter: StateSetter):
+        self._env._match._state_setter = state_setter  # noqa
+
+    @property
+    def spawn_opponents(self):
+        return self._env._match._spawn_opponents  # noqa
+
+    @property
+    def team_size(self):
+        return self._env._match._team_size  # noqa
