@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from rocket_learn.agent.policy import Policy
 from rocket_learn.agent.pretrained_policy import HardcodedAgent
-from rocket_learn.experience_buffer import ExperienceBuffer
+from rocket_learn.utils.experience_buffer import ExperienceBuffer
 from rocket_learn.utils.dynamic_gamemode_setter import DynamicGMSetter
 
 

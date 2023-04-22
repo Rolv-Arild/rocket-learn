@@ -1,18 +1,20 @@
 import os
+from typing import Dict, Any
 
 import numpy as np
 
 import torch
 import torch.nn.functional as F
 
-from rocket_learn.agent.pretrained_policy import HardcodedAgent
-from pretrained_agents.nexto.nexto_v2_obs import Nexto_V2_ObsBuilder
-
 from rlgym.utils.gamestates import GameState
 
 import copy
 
-class NextoV2(HardcodedAgent):
+from rocket_learn.agent.pretrained_agents.nexto.nexto_v2_obs import Nexto_V2_ObsBuilder
+from rocket_learn.agent.rocket_league_agent import RocketLeagueAgent
+
+
+class NextoV2(RocketLeagueAgent):
     def __init__(self, model_string, n_players):
         cur_dir = os.path.dirname(os.path.realpath(__file__))
         self.actor = torch.jit.load(os.path.join(cur_dir, model_string))
@@ -48,7 +50,8 @@ class NextoV2(HardcodedAgent):
         actions = np.array(actions)
         return actions
 
-    def act(self, state: GameState, player_index: int):
+    def act(self, agents_observations: Dict[str, Any]) -> Dict[str, Any]:
+        # TODO fix to comply with new spec
         player = state.players[player_index]
         teammates = [p for p in state.players if p.team_num == player.team_num and p != player]
         opponents = [p for p in state.players if p.team_num != player.team_num]

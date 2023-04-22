@@ -1,26 +1,28 @@
 import os
+from typing import Dict, Any
 
 import numpy as np
 
 import torch
 import torch.nn.functional as F
 
-from rocket_learn.agent.pretrained_policy import HardcodedAgent
-from pretrained_agents.necto.necto_v1_obs import NectoV1Obs
-
 from rlgym.utils.gamestates import GameState
 
 import copy
 
+from rocket_learn.agent.agent import Agent
+from rocket_learn.agent.pretrained_agents.necto.necto_v1_obs import NectoV1Obs
 
-class NectoV1(HardcodedAgent):
+
+class NectoV1(Agent):
     def __init__(self, model_string, n_players):
         cur_dir = os.path.dirname(os.path.realpath(__file__))
         self.actor = torch.jit.load(os.path.join(cur_dir, model_string))
         self.obs_builder = NectoV1Obs(n_players=n_players)
         self.previous_action = np.array([0, 0, 0, 0, 0, 0, 0, 0])
 
-    def act(self, state: GameState, player_index: int):
+    def act(self, agents_observations: Dict[str, Any]) -> Dict[str, Any]:
+        # TODO fix to comply with new spec
         player = state.players[player_index]
         teammates = [p for p in state.players if p.team_num == player.team_num and p != player]
         opponents = [p for p in state.players if p.team_num != player.team_num]

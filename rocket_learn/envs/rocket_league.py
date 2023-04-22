@@ -11,7 +11,7 @@ class RocketLeague(ParallelEnv):
                                 for side in ("blue", "orange")
                                 for n in range(max_blue if side == "blue" else max_orange)]
 
-    def reset(self, seed: Optional[int] = None, return_info: bool = False, options: Optional[dict] = None) -> ObsDict:
+    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> ObsDict:
         raise NotImplementedError
 
     def seed(self, seed=None):

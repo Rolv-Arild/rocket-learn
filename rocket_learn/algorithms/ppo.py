@@ -1,9 +1,5 @@
-import cProfile
-import io
 import os
-import pstats
 import time
-import sys
 from typing import Iterator, List, Tuple, Union
 
 import numba
@@ -16,7 +12,7 @@ from torch.nn.utils import clip_grad_norm_
 
 from rocket_learn.agent.actor_critic_agent import ActorCriticAgent
 from rocket_learn.agent.policy import Policy
-from rocket_learn.experience_buffer import ExperienceBuffer
+from rocket_learn.utils.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
 
 

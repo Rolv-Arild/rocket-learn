@@ -4,8 +4,8 @@ from torch import nn
 
 
 class Policy(nn.Module, ABC):
-    def __init__(self, identifier, rating, deterministic=False):
-        super().__init__(identifier, rating)
+    def __init__(self, deterministic=False):
+        super().__init__()
         self.deterministic = deterministic
 
     @abstractmethod

@@ -15,7 +15,7 @@ from rlgym.utils.action_parsers.discrete_act import DiscreteAction
 
 from rocket_learn.agent.actor_critic_agent import ActorCriticAgent
 from rocket_learn.agent.discrete_policy import DiscretePolicy
-from rocket_learn.ppo import PPO
+from rocket_learn.algorithms.ppo import PPO
 from rocket_learn.rollout_generator.redis.redis_rollout_generator import RedisRolloutGenerator
 from rocket_learn.utils.util import SplitLayer
 

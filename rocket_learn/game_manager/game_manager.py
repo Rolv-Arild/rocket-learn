@@ -1,10 +1,7 @@
 from abc import ABC
-from typing import Dict, Tuple, Any, List
+from typing import Tuple, Any
 
-import numpy as np
 from pettingzoo import ParallelEnv
-
-from rocket_learn.experience_buffer import ExperienceBuffer
 
 
 class GameManager(ABC):

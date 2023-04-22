@@ -115,9 +115,9 @@ class NectoV1Obs(ObsBuilder):
 
         q = qkv[0, main_n, :]
 
-        #print(q)
-        #print("vs")
-        #print(previous_action)
+        # print(q)
+        # print("vs")
+        # print(previous_action)
         q = np.expand_dims(np.concatenate((q, previous_action), axis=0), axis=(0, 1))
         # kv = np.delete(qkv, main_n, axis=0)  # Delete main? Watch masking
         kv = qkv

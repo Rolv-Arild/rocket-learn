@@ -8,7 +8,7 @@ from redis import Redis
 from rlgym.utils.gamestates import GameState
 from trueskill import Rating
 
-from rocket_learn.experience_buffer import ExperienceBuffer
+from rocket_learn.utils.experience_buffer import ExperienceBuffer
 from rocket_learn.utils.batched_obs_builder import BatchedObsBuilder
 from rocket_learn.utils.gamestate_encoding import encode_gamestate
 import msgpack

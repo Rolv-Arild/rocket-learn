@@ -2,7 +2,7 @@ from typing import Iterator
 
 import rlgym
 from rocket_learn.agent.policy import Policy
-from rocket_learn.experience_buffer import ExperienceBuffer
+from rocket_learn.utils.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
 from rocket_learn.utils.generate_episode import generate_episode
 

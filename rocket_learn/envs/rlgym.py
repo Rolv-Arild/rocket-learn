@@ -12,6 +12,7 @@ from rlgym.utils.common_values import BLUE_TEAM
 from rlgym.utils.gamestates import GameState, PlayerData
 
 from rocket_learn.envs.rocket_league import RocketLeague
+from rocket_learn.utils.dynamic_gamemode_setter import DynamicGMSetter
 from rocket_learn.utils.truncation import TerminalTruncatedCondition
 from rocket_learn.utils.gamestate_encoding import encode_gamestate
 
@@ -56,7 +57,7 @@ class RLGym(RocketLeague):
         self._env = rlgym.make(game_speed=game_speed, tick_skip=tick_skip, spawn_opponents=spawn_opponents,
                                team_size=team_size, gravity=gravity, boost_consumption=boost_consumption,
                                terminal_conditions=terminal_conditions, reward_fn=reward_fn, obs_builder=obs_builder,
-                               action_parser=action_parser, state_setter=state_setter,
+                               action_parser=action_parser, state_setter=DynamicGMSetter(state_setter),
                                launch_preference=launch_preference, use_injector=True, force_paging=force_paging,
                                raise_on_crash=True, auto_minimize=auto_minimize)
         self._state = None
@@ -66,9 +67,11 @@ class RLGym(RocketLeague):
         return cls(*args, **kwargs)
 
     def reset(self, seed: Optional[int] = None, return_info: bool = False, options: Optional[dict] = None) -> ObsDict:
+        # TODO update method signature according to PettingZoo
         self._env.update_settings(game_speed=options.get("game_speed", None),
                                   gravity=options.get("gravity", None),
                                   boost_consumption=options.get("boost_consumption", None))
+        self.team_size = (options.get("blue"), options.get("orange"))
         obs, info = self._env.reset(return_info=True)
         state: GameState = info["state"]
 
@@ -199,16 +202,27 @@ class RLGym(RocketLeague):
 
     @property
     def state_setter(self):
-        return self._env._match._state_setter  # noqa
+        return self._env._match._state_setter.setter  # noqa
 
     @state_setter.setter
     def state_setter(self, state_setter: StateSetter):
-        self._env._match._state_setter = state_setter  # noqa
+        self._env._match._state_setter.setter = state_setter  # noqa
 
     @property
     def spawn_opponents(self):
         return self._env._match._spawn_opponents  # noqa
 
     @property
+    def max_team_size(self):
+        return self._env._match.agents  # noqa
+
+    @property
     def team_size(self):
-        return self._env._match._team_size  # noqa
+        setter: DynamicGMSetter = self._env._match._state_setter  # noqa
+        return setter.blue, setter.orange
+
+    @team_size.setter
+    def team_size(self, value):
+        blue, orange = value
+        setter: DynamicGMSetter = self._env._match._state_setter  # noqa
+        setter.set_team_size(blue, orange)

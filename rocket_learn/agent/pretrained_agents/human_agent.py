@@ -1,11 +1,12 @@
-import pygame
+from typing import Dict, Any
+
 import keyboard
+import pygame
 
-from rlgym.utils.gamestates import GameState
+from rocket_learn.agent.rocket_league_agent import RocketLeagueAgent
 
-from rocket_learn.agent.pretrained_policy import HardcodedAgent
 
-class HumanAgent(HardcodedAgent):
+class HumanAgent(RocketLeagueAgent):
     def __init__(self):
         pygame.init()
         self.controller_map = {}
@@ -50,7 +51,6 @@ class HumanAgent(HardcodedAgent):
 
         return [throttle, steer, pitch, yaw, roll, jump, boost, handbrake]
 
-
     def kbm_actions(self, state):
         player = [p for p in state.players if p.team_num == 0][0]
 
@@ -85,7 +85,8 @@ class HumanAgent(HardcodedAgent):
 
         return [throttle, steer, pitch, yaw, roll, jump, boost, handbrake]
 
-    def act(self, state: GameState, player_index: int):
+    def act(self, agents_observations: Dict[str, Any]):
+        # TODO fix to comply with new spec
         if self.joystick:
             actions = self.controller_actions(state)
         else:

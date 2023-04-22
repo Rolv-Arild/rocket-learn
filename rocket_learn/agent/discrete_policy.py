@@ -11,7 +11,7 @@ from rocket_learn.agent.policy import Policy
 
 class DiscretePolicy(Policy):
     def __init__(self, net: nn.Module, shape: Tuple[int, ...] = (3,) * 5 + (2,) * 3, deterministic=False):
-        super().__init__("a", "b", deterministic)
+        super().__init__(deterministic)
         self.net = net
         self.shape = shape
 

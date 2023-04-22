@@ -1,7 +1,7 @@
 import numpy as np
 
 from rocket_learn.utils.gamestate_encoding import StateConstants
-from rocket_learn.utils.stat_trackers.stat_tracker import StatTracker
+from rocket_learn.stat_trackers.stat_tracker import StatTracker
 
 
 class Speed(StatTracker):

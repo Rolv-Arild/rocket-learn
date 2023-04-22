@@ -23,8 +23,11 @@ class DefaultManager(GameManager):
     def generate_matchup(self) -> Tuple[DefaultMatchup, int]:
         raise NotImplementedError
 
-    def _episode(self, car_identifier, identifier_agent):
-        observations, info = self.env.reset()
+    def _episode(self, car_identifier, identifier_agent, boost_consumption=1, gravity=1):
+        options = dict(boost_consumption=boost_consumption, gravity=gravity,
+                       blue=sum(k.startswith("blue") for k in car_identifier),
+                       orange=sum(k.startswith("orange") for k in car_identifier))
+        observations, info = self.env.reset(options=options)
         all_states = [self.env.state()]
 
         identifier_cars = {}
@@ -78,7 +81,12 @@ class DefaultManager(GameManager):
         self.gamemode_exp[mode] += steps
 
     def evaluate(self, matchup: DefaultMatchup) -> int:
-        pass  # TODO, how do we handle scoreboard?
+        # TODO, how do we handle scoreboard?
+        #  Maybe include it by default in RLGym obs?
+        #  Need to handle updating, state setting, terminal and reward still
+        #  Could include in options maybe, but ideally StateSetter should do it I guess
+        #  Default is clearly overtime (doesn't end unless goal is scored)
+        pass
 
     def show(self, matchup: DefaultMatchup):
         states, steps = self._episode(*matchup)

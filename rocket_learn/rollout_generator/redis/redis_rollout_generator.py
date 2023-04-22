@@ -14,12 +14,12 @@ from rlgym.utils import ObsBuilder, RewardFunction
 from rlgym.utils.action_parsers import ActionParser
 from trueskill import Rating, rate, SIGMA
 
-from rocket_learn.experience_buffer import ExperienceBuffer
+from rocket_learn.utils.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
 from rocket_learn.rollout_generator.redis.utils import decode_buffers, _unserialize, QUALITIES, _serialize, ROLLOUTS, \
     VERSION_LATEST, OPPONENT_MODELS, CONTRIBUTORS, N_UPDATES, MODEL_LATEST, _serialize_model, get_rating, \
     _ALL, LATEST_RATING_ID, EXPERIENCE_PER_MODE
-from rocket_learn.utils.stat_trackers.stat_tracker import StatTracker
+from rocket_learn.stat_trackers import StatTracker
 
 
 class RedisRolloutGenerator(BaseRolloutGenerator):

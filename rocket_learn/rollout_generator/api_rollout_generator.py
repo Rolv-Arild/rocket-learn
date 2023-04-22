@@ -2,11 +2,9 @@ from typing import Iterator
 from uuid import uuid4
 
 from fastapi import FastAPI  # noqa
-from pydantic import Field
 from pydantic.main import Model  # noqa
-from starlette.middleware.gzip import GZipMiddleware
 
-from rocket_learn.experience_buffer import ExperienceBuffer
+from rocket_learn.utils.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.base_rollout_generator import BaseRolloutGenerator
 
 
