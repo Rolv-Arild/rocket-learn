@@ -1,18 +1,36 @@
 import math
 import random
+from collections import namedtuple
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.random import poisson
+from rlgym.utils import StateSetter
 from rlgym.utils.common_values import BACK_WALL_Y, SIDE_WALL_X, GOAL_HEIGHT
 
 from rlgym.utils.gamestates import GameState
+from rlgym.utils.state_setters import StateWrapper
 
 TICKS_PER_SECOND = 120
 SECONDS_PER_MINUTE = 60
 GOALS_PER_MIN = (1, 0.6, 0.45)  # Stats from ballchasing, S14 GC (before SSL)
 
 
+@dataclass
 class Scoreboard:
+    blue: int
+    orange: int
+    timer: float  # Seconds
+
+
+# Scoreboard = namedtuple("Scoreboard", "blue orange seconds")
+
+# class ScoreboardLogic:
+#     def reset(self, initial_state: GameState):
+
+
+
+class DefaultScoreboardLogic:
     def __init__(self, random_resets=True, tick_skip=8, max_time_seconds=300, skip_warning=False):
         super().__init__()
         self.random_resets = random_resets
@@ -46,7 +64,6 @@ class Scoreboard:
         else:
             self.scoreline = 0, 0
             self.ticks_left = self.max_time_seconds * TICKS_PER_SECOND
-        self.modify_gamestate(initial_state)
 
     def step(self, state: GameState, update_scores=True):
         if state != self.state:
@@ -74,10 +91,6 @@ class Scoreboard:
                 self.scoreline = b, o
 
             self.state = state
-        self.modify_gamestate(state)
-
-    def modify_gamestate(self, state: GameState):
-        state.inverted_ball.angular_velocity[:] = *self.scoreline, self.ticks_left
 
     def is_overtime(self):
         return self.ticks_left > 0 and math.isinf(self.ticks_left)
@@ -89,6 +102,9 @@ class Scoreboard:
         return win_prob(self.state.players // 2,
                         self.ticks_left * TICKS_PER_SECOND,
                         self.scoreline[0] - self.scoreline[1]).item()
+
+    def scoreboard(self):
+        return Scoreboard(*self.scoreline, self.ticks_left * TICKS_PER_SECOND)
 
 
 FLOOR_AREA = 4 * BACK_WALL_Y * SIDE_WALL_X - 1152 * 1152  # Subtract corners
@@ -140,3 +156,11 @@ def win_prob(players_per_team, time_left_seconds, differential):
     # p[inverted] = 1 - p[inverted]
 
     return p
+
+
+# class StateSetterWithScoreboard(StateSetter):
+#     def __init__(self, setter: StateSetter):
+#         self.setter = setter
+#
+#     def reset(self, state_wrapper: StateWrapper):
+#         self.setter.reset(state_wrapper)

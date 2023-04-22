@@ -32,10 +32,11 @@ def send_experience_buffers(redis: Redis, identifiers: list[str], experience_buf
 
 
 class RedisAgent(TorchAgent, ABC):
-    def __init__(self, policy: Policy,
-                 redis: Redis, send_obs: bool = True, send_states: bool = True):
+    def __init__(self, policy: Policy, redis: Redis, identifier: str,
+                 send_obs: bool = True, send_states: bool = True):
         super().__init__(policy)
         self.redis = redis
+        self.identifier = identifier
 
         self.send_obs = send_obs
         self.send_states = send_states
