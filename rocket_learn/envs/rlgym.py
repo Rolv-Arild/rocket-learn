@@ -13,6 +13,7 @@ from rlgym.utils.gamestates import GameState, PlayerData
 
 from rocket_learn.envs.rocket_league import RocketLeague
 from rocket_learn.utils.dynamic_gamemode_setter import DynamicGMSetter
+from rocket_learn.utils.scoreboard import ScoreboardLogic, ScoreboardObs, NullScoreboardLogic, ScoreboardTerminal
 from rocket_learn.utils.truncation import TerminalTruncatedCondition
 from rocket_learn.utils.gamestate_encoding import encode_gamestate
 
@@ -41,6 +42,7 @@ class RLGym(RocketLeague):
                  tick_skip,
                  terminal_conditions,
                  state_setter,
+                 scoreboard_logic: Optional[ScoreboardLogic] = None,
                  # By default, the Agent class parses actions, builds observations and assigns rewards
                  action_parser=DefaultAction(),
                  obs_builder=GameStateObs(),
@@ -54,6 +56,18 @@ class RLGym(RocketLeague):
                  force_paging=False,
                  auto_minimize=True):
         super().__init__(blue=env._match._team_size, orange=env._match._team_size)  # noqa
+        if isinstance(terminal_conditions, TerminalCondition):
+            terminal_conditions = [terminal_conditions]
+        if scoreboard_logic is not None and not isinstance(obs_builder, ScoreboardObs):
+            obs_builder = ScoreboardObs(obs_builder, scoreboard_logic)
+            terminal_conditions.append(ScoreboardTerminal(scoreboard_logic))
+        elif scoreboard_logic is None and isinstance(obs_builder, GameStateObs):
+            scoreboard_logic = NullScoreboardLogic()
+            obs_builder = ScoreboardObs(obs_builder, scoreboard_logic)
+            terminal_conditions.append(ScoreboardTerminal(scoreboard_logic))
+
+        self.scoreboard_logic = scoreboard_logic
+
         self._env = rlgym.make(game_speed=game_speed, tick_skip=tick_skip, spawn_opponents=spawn_opponents,
                                team_size=team_size, gravity=gravity, boost_consumption=boost_consumption,
                                terminal_conditions=terminal_conditions, reward_fn=reward_fn, obs_builder=obs_builder,

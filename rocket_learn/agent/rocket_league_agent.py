@@ -10,7 +10,7 @@ class RocketLeagueAgent(Agent):
     def reset(self, initial_state: GameState, agents: Set[str]):
         raise NotImplementedError
 
-    # The "Any"s here will generally be GameState and ndarray respectively but it's not forced
+    # The "Any"s here will generally be (GameState, Scoreboard) and ndarray respectively but it's not forced
     def act(self, agents_observations: Dict[str, Any]) -> Dict[str, Any]:
         raise NotImplementedError
 

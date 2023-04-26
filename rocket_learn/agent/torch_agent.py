@@ -9,6 +9,7 @@ from rlgym.utils.gamestates import GameState
 from rocket_learn.agent.policy import Policy
 from rocket_learn.agent.rocket_league_agent import RocketLeagueAgent
 from rocket_learn.utils.experience_buffer import ExperienceBuffer
+from rocket_learn.utils.scoreboard import Scoreboard
 
 
 class TorchAgent(RocketLeagueAgent, ABC):
@@ -49,7 +50,7 @@ class TorchAgent(RocketLeagueAgent, ABC):
 
         return action_indices, log_probs
 
-    def act(self, agents_observations: Dict[str, GameState]) -> Dict[str, np.ndarray]:
+    def act(self, agents_observations: Dict[str, Tuple[GameState, Scoreboard]]) -> Dict[str, np.ndarray]:
         cars = list(agents_observations.keys())
         # The assumption is that all cars will share the same object
         state = next(iter(agents_observations.values()))

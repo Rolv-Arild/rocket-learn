@@ -1,14 +1,13 @@
 import math
 import random
-from collections import namedtuple
 from dataclasses import dataclass
+from typing import Any, Union
 
 import numpy as np
 from numpy.random import poisson
-from rlgym.utils import StateSetter
+from rlgym.utils import ObsBuilder, StateSetter, TerminalCondition
 from rlgym.utils.common_values import BACK_WALL_Y, SIDE_WALL_X, GOAL_HEIGHT
-
-from rlgym.utils.gamestates import GameState
+from rlgym.utils.gamestates import GameState, PlayerData
 from rlgym.utils.state_setters import StateWrapper
 
 TICKS_PER_SECOND = 120
@@ -16,7 +15,7 @@ SECONDS_PER_MINUTE = 60
 GOALS_PER_MIN = (1, 0.6, 0.45)  # Stats from ballchasing, S14 GC (before SSL)
 
 
-@dataclass
+@dataclass(frozen=True)
 class Scoreboard:
     blue: int
     orange: int
@@ -25,24 +24,54 @@ class Scoreboard:
 
 # Scoreboard = namedtuple("Scoreboard", "blue orange seconds")
 
-# class ScoreboardLogic:
-#     def reset(self, initial_state: GameState):
+class ScoreboardLogic:
+    def __init__(self, blue: int, orange: int, ticks_left: Union[int, float]):
+        self.blue = blue
+        self.orange = orange
+        self.ticks_left = ticks_left
+        self._scoreboard = None
+
+    def reset(self, initial_state: GameState):
+        raise NotImplementedError
+
+    def step(self, state: GameState):
+        raise NotImplementedError
+
+    @property
+    def scoreboard(self) -> Scoreboard:
+        return self._scoreboard
+
+    def is_overtime(self):
+        raise NotImplementedError
+
+    def is_finished(self):
+        raise NotImplementedError
 
 
+class NullScoreboardLogic(ScoreboardLogic):
+    def __init__(self):
+        super().__init__(0, 0, float("inf"))
 
-class DefaultScoreboardLogic:
-    def __init__(self, random_resets=True, tick_skip=8, max_time_seconds=300, skip_warning=False):
-        super().__init__()
+    def reset(self, initial_state: GameState):
+        pass
+
+    def step(self, state: GameState):
+        pass
+
+    def is_overtime(self):
+        return True
+
+    def is_finished(self):
+        return True
+
+
+class DefaultScoreboardLogic(ScoreboardLogic):
+    def __init__(self, tick_skip, random_resets=True, max_time_seconds=300):
+        super().__init__(0, 0, max_time_seconds)
         self.random_resets = random_resets
         self.tick_skip = tick_skip
         self.max_time_seconds = max_time_seconds
-        self.ticks_left = None
-        self.scoreline = None
         self.state = None
-        if not skip_warning:
-            print("WARNING: The Scoreboard object overwrites the inverted ball ang.vel. to include scoreboard, "
-                  "make sure you're not using that and instead inverting on your own. "
-                  "Call it in your obs builder's pre-step method to use.")
 
     def reset(self, initial_state: GameState):
         self.state = initial_state
@@ -60,37 +89,43 @@ class DefaultScoreboardLogic:
                 seconds_spent = self.max_time_seconds - self.ticks_left / TICKS_PER_SECOND
                 mu_spent = gpm * seconds_spent / SECONDS_PER_MINUTE
                 b, o = poisson(mu_spent, size=2).tolist()
-            self.scoreline = b, o
+            self.blue = b
+            self.orange = o
         else:
-            self.scoreline = 0, 0
+            self.blue = 0
+            self.orange = 0
             self.ticks_left = self.max_time_seconds * TICKS_PER_SECOND
 
-    def step(self, state: GameState, update_scores=True):
+        self._scoreboard = Scoreboard(self.blue, self.orange, self.ticks_left * TICKS_PER_SECOND)
+
+    def step(self, state: GameState):
         if state != self.state:
             if state.ball.position[1] != 0:  # Don't count during kickoffs
                 self.ticks_left = max(0, self.ticks_left - self.tick_skip)
 
-            if update_scores:
-                b, o = self.scoreline
-                changed = False
-                if state.blue_score > self.state.blue_score:  # Check in case of crash
-                    b += state.blue_score - self.state.blue_score
-                    changed = True
-                if state.orange_score > self.state.orange_score:
-                    o += state.orange_score - self.state.orange_score
-                    changed = True
-                tied = b == o
-                if self.is_overtime():
-                    if not tied:
-                        self.ticks_left = float("-inf")  # Finished
-                if self.ticks_left <= 0 and (state.ball.position[2] <= 110 or changed):
-                    if tied:
-                        self.ticks_left = float("inf")  # Overtime
-                    else:
-                        self.ticks_left = float("-inf")  # Finished
-                self.scoreline = b, o
+            b, o = self.blue, self.orange
+            changed = False
+            if state.blue_score > self.state.blue_score:  # Check in case of crash
+                b += state.blue_score - self.state.blue_score
+                changed = True
+            if state.orange_score > self.state.orange_score:
+                o += state.orange_score - self.state.orange_score
+                changed = True
+            tied = b == o
+            if self.is_overtime():
+                if not tied:
+                    self.ticks_left = float("-inf")  # Finished
+            if self.ticks_left <= 0 and (state.ball.position[2] <= 110 or changed):
+                if tied:
+                    self.ticks_left = float("inf")  # Overtime
+                else:
+                    self.ticks_left = float("-inf")  # Finished
+            self.blue = b
+            self.orange = o
 
             self.state = state
+
+        self._scoreboard = Scoreboard(self.blue, self.orange, self.ticks_left * TICKS_PER_SECOND)
 
     def is_overtime(self):
         return self.ticks_left > 0 and math.isinf(self.ticks_left)
@@ -101,10 +136,7 @@ class DefaultScoreboardLogic:
     def win_prob(self):
         return win_prob(self.state.players // 2,
                         self.ticks_left * TICKS_PER_SECOND,
-                        self.scoreline[0] - self.scoreline[1]).item()
-
-    def scoreboard(self):
-        return Scoreboard(*self.scoreline, self.ticks_left * TICKS_PER_SECOND)
+                        self.blue - self.orange).item()
 
 
 FLOOR_AREA = 4 * BACK_WALL_Y * SIDE_WALL_X - 1152 * 1152  # Subtract corners
@@ -158,9 +190,31 @@ def win_prob(players_per_team, time_left_seconds, differential):
     return p
 
 
-# class StateSetterWithScoreboard(StateSetter):
-#     def __init__(self, setter: StateSetter):
-#         self.setter = setter
-#
-#     def reset(self, state_wrapper: StateWrapper):
-#         self.setter.reset(state_wrapper)
+class ScoreboardObs(ObsBuilder):
+    def __init__(self, obs_builder: ObsBuilder, scoreboard_logic: ScoreboardLogic):
+        super().__init__()
+        self.obs_builder = obs_builder
+        self.scoreboard_logic = scoreboard_logic
+
+    def reset(self, initial_state: GameState):
+        self.obs_builder.reset(initial_state)
+
+    def pre_step(self, state: GameState):
+        self.scoreboard_logic.step(state)
+        self.obs_builder.pre_step(state)
+
+    def build_obs(self, player: PlayerData, state: GameState, previous_action: np.ndarray) -> Any:
+        obs = self.obs_builder.build_obs(player, state, previous_action)
+        return obs, self.scoreboard_logic.scoreboard
+
+
+class ScoreboardTerminal(TerminalCondition):
+    def __init__(self, scoreboard_logic: ScoreboardLogic):
+        super().__init__()
+        self.scoreboard_logic = scoreboard_logic
+
+    def reset(self, initial_state: GameState):
+        pass
+
+    def is_terminal(self, current_state: GameState) -> bool:
+        return self.scoreboard_logic.is_finished()
