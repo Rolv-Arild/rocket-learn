@@ -5,7 +5,7 @@ from rlgym.utils import ObsBuilder
 from rlgym.utils.gamestates import PlayerData, GameState
 
 from rocket_learn.utils.gamestate_encoding import encode_gamestate
-from rocket_learn.utils.scoreboard import Scoreboard
+from rocket_learn.scoreboard.scoreboard_logic import Scoreboard
 
 
 class BatchedObsBuilder(ObsBuilder):

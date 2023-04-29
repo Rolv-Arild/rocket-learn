@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import Any, Set, Dict
+from typing import Any, Set, Dict, Tuple
 
 import numpy as np
 import torch
@@ -9,7 +9,7 @@ from rlgym.utils.gamestates import GameState
 from rocket_learn.agent.policy import Policy
 from rocket_learn.agent.rocket_league_agent import RocketLeagueAgent
 from rocket_learn.utils.experience_buffer import ExperienceBuffer
-from rocket_learn.utils.scoreboard import Scoreboard
+from rocket_learn.scoreboard.scoreboard_logic import Scoreboard
 
 
 class TorchAgent(RocketLeagueAgent, ABC):
@@ -60,10 +60,10 @@ class TorchAgent(RocketLeagueAgent, ABC):
 
         if isinstance(all_obs[0], tuple):
             all_obs = tuple(
-                torch.from_numpy(np.stack(o for o in zip(*all_obs))).float()
+                torch.from_numpy(np.vstack(o for o in zip(*all_obs))).float()
             )
         else:
-            all_obs = torch.from_numpy(np.stack(all_obs)).float()
+            all_obs = torch.from_numpy(np.vstack(all_obs)).float()
 
         action_indices, log_probs = self.run_model(all_obs)
 

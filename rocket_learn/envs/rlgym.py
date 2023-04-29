@@ -12,8 +12,8 @@ from rlgym.utils.common_values import BLUE_TEAM
 from rlgym.utils.gamestates import GameState, PlayerData
 
 from rocket_learn.envs.rocket_league import RocketLeague
+from rocket_learn.scoreboard.scoreboard_logic import CustomObjectLogic
 from rocket_learn.utils.dynamic_gamemode_setter import DynamicGMSetter
-from rocket_learn.utils.scoreboard import ScoreboardLogic, ScoreboardObs, NullScoreboardLogic, ScoreboardTerminal
 from rocket_learn.utils.truncation import TerminalTruncatedCondition
 from rocket_learn.utils.gamestate_encoding import encode_gamestate
 
@@ -42,7 +42,7 @@ class RLGym(RocketLeague):
                  tick_skip,
                  terminal_conditions,
                  state_setter,
-                 scoreboard_logic: Optional[ScoreboardLogic] = None,
+                 custom_object_logic: Optional[CustomObjectLogic] = None,
                  # By default, the Agent class parses actions, builds observations and assigns rewards
                  action_parser=DefaultAction(),
                  obs_builder=GameStateObs(),
@@ -56,17 +56,9 @@ class RLGym(RocketLeague):
                  force_paging=False,
                  auto_minimize=True):
         super().__init__(blue=env._match._team_size, orange=env._match._team_size)  # noqa
-        if isinstance(terminal_conditions, TerminalCondition):
-            terminal_conditions = [terminal_conditions]
-        if scoreboard_logic is not None and not isinstance(obs_builder, ScoreboardObs):
-            obs_builder = ScoreboardObs(obs_builder, scoreboard_logic)
-            terminal_conditions.append(ScoreboardTerminal(scoreboard_logic))
-        elif scoreboard_logic is None and isinstance(obs_builder, GameStateObs):
-            scoreboard_logic = NullScoreboardLogic()
-            obs_builder = ScoreboardObs(obs_builder, scoreboard_logic)
-            terminal_conditions.append(ScoreboardTerminal(scoreboard_logic))
-
-        self.scoreboard_logic = scoreboard_logic
+        # if isinstance(terminal_conditions, TerminalCondition):
+        #     terminal_conditions = [terminal_conditions]
+        self.custom_object_logic = custom_object_logic
 
         self._env = rlgym.make(game_speed=game_speed, tick_skip=tick_skip, spawn_opponents=spawn_opponents,
                                team_size=team_size, gravity=gravity, boost_consumption=boost_consumption,
@@ -100,7 +92,12 @@ class RLGym(RocketLeague):
                 o += 1
         self.agents = player_ids
 
-        obs = dict(zip(self.agents, obs))
+        if self.custom_object_logic is None:
+            obs = dict(zip(self.agents, obs))
+        else:
+            self.custom_object_logic.reset(state)
+            custom_object = self.custom_object_logic.step(state)
+            obs = {a: (o, custom_object) for a, o in zip(self.agents, obs)}
 
         self._state = state
 
@@ -119,16 +116,24 @@ class RLGym(RocketLeague):
     def step(self, actions: ActionDict) -> Tuple[
         ObsDict, Dict[str, float], Dict[str, bool], Dict[str, bool], Dict[str, dict]
     ]:
-        obs, reward, done, info = self._env.step([actions[agent] for agent in self.agents])
+        obs, reward, terminated, info = self._env.step([actions[agent] for agent in self.agents])
 
         state = info["state"]
         truncated = self.is_truncated(info["state"])
 
         self._state = state
 
-        obs = dict(zip(self.agents, obs))
+        if self.custom_object_logic is None:
+            obs = dict(zip(self.agents, obs))
+        else:
+            custom_object = self.custom_object_logic.step(state)
+            obs = {a: (o, custom_object) for a, o in zip(self.agents, obs)}
+            term, trunc = self.custom_object_logic.done(state)
+            terminated |= term
+            truncated |= truncated
+
         reward = dict(zip(self.agents, reward))
-        terminated = {a: done for a in self.agents}
+        terminated = {a: terminated for a in self.agents}
         truncated = {a: truncated for a in self.agents}
         info = {a: info for a in self.agents}
 
