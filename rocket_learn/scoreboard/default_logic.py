@@ -40,8 +40,6 @@ class DefaultScoreboardLogic(ScoreboardLogic):
             self.orange = 0
             self.ticks_left = self.max_time_seconds * TICKS_PER_SECOND
 
-        self._scoreboard = Scoreboard(self.blue, self.orange, self.ticks_left * TICKS_PER_SECOND)
-
     def step(self, state: GameState):
         if state != self.state:
             if state.ball.position[1] != 0:  # Don't count during kickoffs
