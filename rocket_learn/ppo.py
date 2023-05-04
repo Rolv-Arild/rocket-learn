@@ -215,11 +215,11 @@ class PPO:
 
     @staticmethod
     @numba.njit
-    def _calculate_advantages_numba(rewards, values, gamma, gae_lambda):
+    def _calculate_advantages_numba(rewards, values, gamma, gae_lambda, truncated):
         advantages = np.zeros_like(rewards)
         # v_targets = np.zeros_like(rewards)
         dones = np.zeros_like(rewards)
-        dones[-1] = 1.
+        dones[-1] = 1. if truncated else 0.
         episode_starts = np.zeros_like(rewards)
         episode_starts[0] = 1.
         last_values = values[-1]
@@ -277,10 +277,7 @@ class PPO:
 
             size = rewards.shape[0]
 
-            episode_starts = np.roll(dones, 1)
-            episode_starts[0] = 1.
-
-            advantages = self._calculate_advantages_numba(rewards, values, self.gamma, self.gae_lambda)
+            advantages = self._calculate_advantages_numba(rewards, values, self.gamma, self.gae_lambda, dones[-1] == 2)
 
             returns = advantages + values
 
@@ -395,7 +392,7 @@ class PPO:
                 if self.kl_models_weights is not None:
                     for k, (model, kl_coef, half_life) in enumerate(self.kl_models_weights):
                         if half_life is not None:
-                            kl_coef *= np.exp(np.log(0.5) * self.total_steps / half_life)
+                            kl_coef *= 0.5 ** (self.total_steps / half_life)
                         with torch.no_grad():
                             dist_other = model.get_action_distribution(obs)
                         div = kl_divergence(dist, dist_other).mean()

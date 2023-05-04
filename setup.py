@@ -10,9 +10,9 @@ Learning!
 
 setup(
    name='rocket_learn',
-   version='0.2.6',
+   version='0.2.7',
    description='Rocket Learn',
-   author=['Rolv Arild', 'Daniel Downs'],
+   author='Rolv-Arild Braaten, Daniel Downs',
    url='https://github.com/Rolv-Arild/rocket-learn',
    packages=[package for package in find_packages() if package.startswith("rocket_learn")],
    long_description=long_description,

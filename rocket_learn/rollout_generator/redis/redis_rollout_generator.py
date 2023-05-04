@@ -54,12 +54,12 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         if clear:
             self.redis.delete(*(_ALL + tuple(QUALITIES.format(gm) for gm in gamemodes)))
             self.redis.set(N_UPDATES, 0)
+            self.redis.hset(EXPERIENCE_PER_MODE, mapping={m: 0 for m in gamemodes})
         else:
             if self.redis.exists(ROLLOUTS) > 0:
                 self.redis.delete(ROLLOUTS)
             self.redis.decr(VERSION_LATEST,
                             max_age + 1)  # In case of reload from old version, don't let current seep in
-        self.redis.hset(EXPERIENCE_PER_MODE, mapping={m: 0 for m in gamemodes})
 
         # self.redis.set(SAVE_FREQ, save_every)
         # self.redis.set(MODEL_FREQ, model_every)
