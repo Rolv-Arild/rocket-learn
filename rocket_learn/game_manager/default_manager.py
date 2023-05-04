@@ -1,17 +1,23 @@
 from typing import Dict, Literal, Tuple, List, Iterable
 
 import numpy as np
+from rlgym.utils.state_setters import DefaultState
+from rlgym.utils.terminal_conditions.common_conditions import TimeoutCondition, GoalScoredCondition, \
+    NoTouchTimeoutCondition
 
 from rocket_learn.agent.agent import Agent
+from rocket_learn.envs.rlgym import RLGym
 from rocket_learn.envs.rocket_league import RocketLeague
 from rocket_learn.game_manager.game_manager import GameManager
+from rocket_learn.scoreboard.default_logic import DefaultScoreboardLogic
+from rocket_learn.scoreboard.util import TICKS_PER_SECOND, win_prob
 
 DefaultMatchup = Tuple[Dict[str, str], Dict[str, Agent]]
 
 
 class DefaultManager(GameManager):
     def __init__(self,
-                 env: RocketLeague,
+                 env: RLGym,
                  gamemode_weights: dict[str, float],
                  display: Literal[None, "stochastic", "deterministic", "rollout"] = None):
         super(DefaultManager, self).__init__(env)
@@ -76,11 +82,43 @@ class DefaultManager(GameManager):
         car_identifier, identifier_agent = matchup
         states, steps = self._episode(car_identifier, identifier_agent)
 
-        steps = len(states) * len(states[0])
+        steps = len(states) * len(car_identifier)
         mode = self._get_gamemode(car_identifier.keys())
         self.gamemode_exp[mode] += steps
 
     def evaluate(self, matchup: DefaultMatchup) -> int:
+        old_custom_object_logic = self.env.custom_object_logic
+        self.env.custom_object_logic = DefaultScoreboardLogic(self.env.tick_skip, reset_mode="continue")
+        old_state_setter = self.env.state_setter
+        self.env.state_setter = DefaultState()
+        old_terminals = self.env.terminal_conditions
+        self.env.terminal_conditions = [NoTouchTimeoutCondition(30 * TICKS_PER_SECOND // self.env.tick_skip),
+                                        TimeoutCondition(6 * 60 * TICKS_PER_SECOND // self.env.tick_skip),
+                                        GoalScoredCondition()]
+
+        car_identifier, identifier_agent = matchup
+        b = o = 0
+        while True:
+            self._episode(car_identifier, identifier_agent)
+
+            timed_out = (b == self.env.custom_object_logic.blue and
+                         o == self.env.custom_object_logic.orange)  # No touch/timeout triggered
+
+            b = self.env.custom_object_logic.blue
+            o = self.env.custom_object_logic.orange
+            time_left = self.env.custom_object_logic.ticks_left / TICKS_PER_SECOND
+
+            ff = abs(b - o) >= 3 \
+                 and 0.01 < win_prob(len(car_identifier) // 2, time_left, b - o) < 0.99
+
+            term, trunc = self.env.custom_object_logic.done()
+            if term or ff or timed_out:
+                break
+
+        self.env.custom_object_logic = old_custom_object_logic
+        self.env.state_setter = old_state_setter
+        self.env.terminal_conditions = old_terminals
+
         # TODO, how do we handle scoreboard?
         #  Maybe include it by default in RLGym obs?
         #  Need to handle updating, state setting, terminal and reward still

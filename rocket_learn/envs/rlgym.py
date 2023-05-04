@@ -12,6 +12,7 @@ from rlgym.utils.common_values import BLUE_TEAM
 from rlgym.utils.gamestates import GameState, PlayerData
 
 from rocket_learn.envs.rocket_league import RocketLeague
+from rocket_learn.scoreboard.default_logic import DefaultScoreboardLogic
 from rocket_learn.scoreboard.scoreboard_logic import CustomObjectLogic
 from rocket_learn.utils.dynamic_gamemode_setter import DynamicGMSetter
 from rocket_learn.utils.truncation import TerminalTruncatedCondition
@@ -42,7 +43,7 @@ class RLGym(RocketLeague):
                  tick_skip,
                  terminal_conditions,
                  state_setter,
-                 custom_object_logic: Optional[CustomObjectLogic] = None,
+                 custom_object_logic: Optional[CustomObjectLogic] = "scoreboard",
                  # By default, the Agent class parses actions, builds observations and assigns rewards
                  action_parser=DefaultAction(),
                  obs_builder=GameStateObs(),
@@ -58,6 +59,8 @@ class RLGym(RocketLeague):
         super().__init__(blue=env._match._team_size, orange=env._match._team_size)  # noqa
         # if isinstance(terminal_conditions, TerminalCondition):
         #     terminal_conditions = [terminal_conditions]
+        if custom_object_logic == "scoreboard":
+            custom_object_logic = DefaultScoreboardLogic(tick_skip)
         self.custom_object_logic = custom_object_logic
 
         self._env = rlgym.make(game_speed=game_speed, tick_skip=tick_skip, spawn_opponents=spawn_opponents,

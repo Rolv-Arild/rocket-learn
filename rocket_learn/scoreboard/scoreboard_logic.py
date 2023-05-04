@@ -22,7 +22,7 @@ class CustomObjectLogic:
     def step(self, state: GameState) -> Any:
         raise NotImplementedError
 
-    def done(self, state: GameState) -> Tuple[bool, bool]:  # Terminated, Truncated
+    def done(self) -> Tuple[bool, bool]:  # Terminated, Truncated
         raise NotImplementedError
 
 
@@ -32,7 +32,6 @@ class ScoreboardLogic(CustomObjectLogic):
         self.blue = blue
         self.orange = orange
         self.ticks_left = ticks_left
-        self._scoreboard = None
 
     def reset(self, initial_state: GameState):
         raise NotImplementedError
@@ -40,9 +39,5 @@ class ScoreboardLogic(CustomObjectLogic):
     def step(self, state: GameState) -> Scoreboard:
         raise NotImplementedError
 
-    def done(self, state: GameState) -> Tuple[bool, bool]:
+    def done(self) -> Tuple[bool, bool]:
         raise NotImplementedError
-
-    @property
-    def scoreboard(self):
-        return self._scoreboard

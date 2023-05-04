@@ -1,6 +1,6 @@
 import math
 import random
-from typing import Tuple
+from typing import Tuple, Literal
 
 from numpy.random import poisson
 from rlgym.utils.gamestates import GameState
@@ -10,17 +10,21 @@ from rocket_learn.scoreboard.util import GOALS_PER_MIN, SECONDS_PER_MINUTE, TICK
 
 
 class DefaultScoreboardLogic(ScoreboardLogic):
-    def __init__(self, tick_skip, random_resets=True, max_time_seconds=300):
+    def __init__(self, tick_skip, reset_mode=Literal["random", "beginning", "continue"],
+                 max_time_seconds=300):
         super().__init__(0, 0, max_time_seconds)
-        self.random_resets = random_resets
+        self.reset_mode = reset_mode
         self.tick_skip = tick_skip
         self.max_time_seconds = max_time_seconds
         self.state = None
+        self._scoreboard = None
+        self._truncate = False
+        self._terminate = False
 
     def reset(self, initial_state: GameState):
         self.state = initial_state
         players_per_team = len(initial_state.players) // 2
-        if self.random_resets:
+        if self.reset_mode == "random":
             gpm = GOALS_PER_MIN[players_per_team - 1]
             mu_full = gpm * self.max_time_seconds / SECONDS_PER_MINUTE
             full_game = poisson(mu_full, size=2)
@@ -35,13 +39,29 @@ class DefaultScoreboardLogic(ScoreboardLogic):
                 b, o = poisson(mu_spent, size=2).tolist()
             self.blue = b
             self.orange = o
-        else:
+        elif self.reset_mode == "beginning":
             self.blue = 0
             self.orange = 0
             self.ticks_left = self.max_time_seconds * TICKS_PER_SECOND
+        elif self.reset_mode == "continue":
+            term, trunc = self.done()
+            if term:
+                self.blue = 0
+                self.orange = 0
+                self.ticks_left = self.max_time_seconds * TICKS_PER_SECOND
+        else:
+            raise ValueError("Invalid reset mode")
 
-    def step(self, state: GameState):
+        is_overtime = self.ticks_left > 0 and math.isinf(self.ticks_left)
+
+        self._scoreboard = Scoreboard(self.blue, self.orange,
+                                      self.ticks_left * TICKS_PER_SECOND,
+                                      is_overtime)
+
+    def step(self, state: GameState) -> Scoreboard:
         if state != self.state:
+            was_overtime = self.ticks_left > 0 and math.isinf(self.ticks_left)
+
             if state.ball.position[1] != 0:  # Don't count during kickoffs
                 self.ticks_left = max(0, self.ticks_left - self.tick_skip)
 
@@ -67,14 +87,17 @@ class DefaultScoreboardLogic(ScoreboardLogic):
 
             self.state = state
 
-        is_overtime = self.ticks_left > 0 and math.isinf(self.ticks_left)
+            is_overtime = self.ticks_left > 0 and math.isinf(self.ticks_left)
+            is_finished = self.ticks_left < 0 and math.isinf(self.ticks_left)
 
-        self._scoreboard = Scoreboard(self.blue, self.orange,
-                                      self.ticks_left * TICKS_PER_SECOND,
-                                      is_overtime)
+            self._truncate = is_overtime and not was_overtime
+            self._terminate = is_finished
+
+            self._scoreboard = Scoreboard(self.blue, self.orange,
+                                          self.ticks_left * TICKS_PER_SECOND,
+                                          is_overtime)
 
         return self._scoreboard
 
-    def done(self, state: GameState) -> Tuple[bool, bool]:
-        is_finished = self.ticks_left < 0 and math.isinf(self.ticks_left)
-        return is_finished, False
+    def done(self) -> Tuple[bool, bool]:
+        return self._terminate, self._truncate  # TODO how to reset when ball hits ground at 0:00?
