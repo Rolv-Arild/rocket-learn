@@ -395,7 +395,7 @@ class PPO:
                             kl_coef *= 0.5 ** (self.total_steps / half_life)
                         with torch.no_grad():
                             dist_other = model.get_action_distribution(obs)
-                        div = kl_divergence(dist, dist_other).mean()
+                        div = kl_divergence(dist_other, dist).mean()
                         tot_kl_other_models[k] += div
                         tot_kl_coeffs[k] = kl_coef
                         kl_loss += kl_coef * div
