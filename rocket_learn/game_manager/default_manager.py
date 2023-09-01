@@ -18,7 +18,7 @@ class DefaultManager(GameManager):
                  custom_objects: Optional[List[CustomObjectLogic]] = None,
                  display: Literal[None, "stochastic", "deterministic", "rollout"] = None,
                  ):
-        super(DefaultManager, self).__init__(env)
+        super(DefaultManager, self).__init__(envs)
         if custom_objects is None:
             custom_objects = []
         self.display = display

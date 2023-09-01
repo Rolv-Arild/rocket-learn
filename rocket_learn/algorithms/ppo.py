@@ -212,6 +212,7 @@ class PPO:
     @staticmethod
     @numba.njit
     def _calculate_advantages_numba(rewards, values, gamma, gae_lambda):
+        # TODO add truncation support
         advantages = np.zeros_like(rewards)
         # v_targets = np.zeros_like(rewards)
         dones = np.zeros_like(rewards)
@@ -394,7 +395,7 @@ class PPO:
                             kl_coef *= np.exp(np.log(0.5) * self.total_steps / half_life)
                         with torch.no_grad():
                             dist_other = model.get_action_distribution(obs)
-                        div = kl_divergence(dist, dist_other).mean()
+                        div = kl_divergence(dist_other, dist).mean()
                         tot_kl_other_models[k] += div
                         tot_kl_coeffs[k] = kl_coef
                         kl_loss += kl_coef * div
