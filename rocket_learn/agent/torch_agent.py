@@ -9,7 +9,7 @@ from rlgym.utils.gamestates import GameState
 from rocket_learn.agent.policy import Policy
 from rocket_learn.agent.rocket_league_agent import RocketLeagueAgent
 from rocket_learn.utils.experience_buffer import ExperienceBuffer
-from rocket_learn.scoreboard.scoreboard_logic import Scoreboard
+from rocket_learn.custom_objects.scoreboard.scoreboard import Scoreboard
 
 
 class TorchAgent(RocketLeagueAgent, ABC):

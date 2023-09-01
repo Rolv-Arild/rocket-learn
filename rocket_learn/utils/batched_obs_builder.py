@@ -1,11 +1,11 @@
-from typing import Any, Union, Optional
+from typing import Any, Optional
 
 import numpy as np
 from rlgym.utils import ObsBuilder
 from rlgym.utils.gamestates import PlayerData, GameState
 
 from rocket_learn.utils.gamestate_encoding import encode_gamestate
-from rocket_learn.scoreboard.scoreboard_logic import Scoreboard
+from rocket_learn.custom_objects.scoreboard.scoreboard import Scoreboard
 
 
 class BatchedObsBuilder(ObsBuilder):

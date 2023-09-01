@@ -1,7 +1,7 @@
 from abc import ABC
-from typing import Tuple, Any
+from typing import Tuple, Any, Union, Dict
 
-from pettingzoo import ParallelEnv
+from rlgym.api import RLGym
 
 
 class GameManager(ABC):
@@ -9,8 +9,10 @@ class GameManager(ABC):
     EVAL = 1
     SHOW = 2
 
-    def __init__(self, env: ParallelEnv):
-        self.env = env
+    def __init__(self, envs: Union[Dict[int, RLGym], RLGym]):
+        if isinstance(envs, RLGym):
+            envs = {i: envs for i in (self.ROLLOUT, self.EVAL, self.SHOW)}
+        self.envs = envs
 
     def generate_matchup(self) -> Tuple[Any, int]:
         raise NotImplementedError

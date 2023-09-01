@@ -1,123 +1,91 @@
-from typing import Dict, Literal, Tuple, List, Iterable
+from typing import Dict, Literal, Tuple, List, Optional
 
-import numpy as np
-from rlgym.utils.state_setters import DefaultState
-from rlgym.utils.terminal_conditions.common_conditions import TimeoutCondition, GoalScoredCondition, \
-    NoTouchTimeoutCondition
+from rlgym.api import RLGym, AgentID
+from rlgym.rocket_league.api import GameState
 
 from rocket_learn.agent.agent import Agent
-from rocket_learn.envs.rlgym import RLGym
-from rocket_learn.envs.rocket_league import RocketLeague
+from rocket_learn.custom_objects.custom_object_logic import CustomObjectLogic
+from rocket_learn.custom_objects.scoreboard.util import TICKS_PER_SECOND
 from rocket_learn.game_manager.game_manager import GameManager
-from rocket_learn.scoreboard.default_logic import DefaultScoreboardLogic
-from rocket_learn.scoreboard.util import TICKS_PER_SECOND, win_prob
 
-DefaultMatchup = Tuple[Dict[str, str], Dict[str, Agent]]
+DefaultMatchup = List[Tuple[Agent, List[AgentID]]]
 
 
 class DefaultManager(GameManager):
     def __init__(self,
-                 env: RLGym,
+                 envs: Dict[int, RLGym],
                  gamemode_weights: dict[str, float],
-                 display: Literal[None, "stochastic", "deterministic", "rollout"] = None):
+                 custom_objects: Optional[List[CustomObjectLogic]] = None,
+                 display: Literal[None, "stochastic", "deterministic", "rollout"] = None,
+                 ):
         super(DefaultManager, self).__init__(env)
+        if custom_objects is None:
+            custom_objects = []
         self.display = display
 
         self.gamemode_exp = {k: 0 for k in gamemode_weights.keys()}
         self.gamemode_weights = gamemode_weights
+        self.custom_objects = custom_objects
 
     def generate_matchup(self) -> Tuple[DefaultMatchup, int]:
         raise NotImplementedError
 
-    def _episode(self, car_identifier, identifier_agent, boost_consumption=1, gravity=1):
-        options = dict(boost_consumption=boost_consumption, gravity=gravity,
-                       blue=sum(k.startswith("blue") for k in car_identifier),
-                       orange=sum(k.startswith("orange") for k in car_identifier))
-        observations, info = self.env.reset(options=options)
-        all_states = [self.env.state()]
-
-        identifier_cars = {}
-        for car, identifier in car_identifier.items():
-            identifier_cars.setdefault(identifier, set()).add(car)
+    @staticmethod
+    def _episode(env, matchup: DefaultMatchup):
+        observations = env.reset()
 
         total_agent_steps = 0
 
-        removed_cars = set()
+        all_states = []
         while True:
             # Select actions
             all_actions = {}
-            for identifier, cars in identifier_cars.items():
-                agent = identifier_agent[identifier]
-
-                actions = agent.act({car: observations[car] for car in cars})
+            for agent, agent_ids in matchup:
+                actions = agent.act({agent_id: observations[agent_id] for agent_id in agent_ids})
 
                 all_actions.update(actions)
+                total_agent_steps += len(agent_ids)
 
             # Step
-            observations, rewards, terminated, truncated, info = self.env.step(all_actions)
-            total_agent_steps *= len(self.env.agents)
+            observations, rewards, terminated, truncated = env.step(all_actions)
 
-            state = self.env.state()
+            state = env.state()
             all_states.append(state)
 
-            # Remove agents that are terminated or truncated
-            for car in self.env.agents:
-                ended = {}
-                if terminated[car] or truncated[car]:
-                    identifier = car_identifier[car]
-                    ended.setdefault(identifier, {}).update({car: truncated[car]})
-                    removed_cars.add(car)
-
-                for identifier, truncs in ended.items():
-                    agent = identifier_agent[identifier]
-                    agent.end(state, truncs)
-
             # End if there are no agents left
-            if not self.env.agents:
+            if not env.agents:
                 break
 
         return all_states, total_agent_steps
 
     def rollout(self, matchup: DefaultMatchup):
-        car_identifier, identifier_agent = matchup
-        states, steps = self._episode(car_identifier, identifier_agent)
+        env = self.envs[self.ROLLOUT]
+        states, steps = self._episode(env, matchup)
 
-        steps = len(states) * len(car_identifier)
-        mode = self._get_gamemode(car_identifier.keys())
+        mode = self._get_gamemode(states[0])
         self.gamemode_exp[mode] += steps
 
     def evaluate(self, matchup: DefaultMatchup) -> int:
-        old_custom_object_logic = self.env.custom_object_logic
-        self.env.custom_object_logic = DefaultScoreboardLogic(self.env.tick_skip, reset_mode="continue")
-        old_state_setter = self.env.state_setter
-        self.env.state_setter = DefaultState()
-        old_terminals = self.env.terminal_conditions
-        self.env.terminal_conditions = [NoTouchTimeoutCondition(30 * TICKS_PER_SECOND // self.env.tick_skip),
-                                        TimeoutCondition(6 * 60 * TICKS_PER_SECOND // self.env.tick_skip),
-                                        GoalScoredCondition()]
+        env = self.envs[self.EVAL]
 
-        car_identifier, identifier_agent = matchup
         b = o = 0
         while True:
-            self._episode(car_identifier, identifier_agent)
+            self._episode(env, matchup)
 
-            timed_out = (b == self.env.custom_object_logic.blue and
-                         o == self.env.custom_object_logic.orange)  # No touch/timeout triggered
+            timed_out = (b == env.custom_object_logic.blue and
+                         o == env.custom_object_logic.orange)  # No touch/timeout triggered
 
-            b = self.env.custom_object_logic.blue
-            o = self.env.custom_object_logic.orange
-            time_left = self.env.custom_object_logic.ticks_left / TICKS_PER_SECOND
+            b = env.custom_object_logic.blue
+            o = env.custom_object_logic.orange
+            time_left = env.custom_object_logic.ticks_left / TICKS_PER_SECOND
 
-            ff = abs(b - o) >= 3 \
-                 and 0.01 < win_prob(len(car_identifier) // 2, time_left, b - o) < 0.99
-
-            term, trunc = self.env.custom_object_logic.done()
+            term, trunc = env.custom_object_logic.done()
             if term or ff or timed_out:
                 break
 
-        self.env.custom_object_logic = old_custom_object_logic
-        self.env.state_setter = old_state_setter
-        self.env.terminal_conditions = old_terminals
+        env.custom_object_logic = old_custom_object_logic
+        env.state_setter = old_state_setter
+        env.terminal_conditions = old_terminals
 
         # TODO, how do we handle scoreboard?
         #  Maybe include it by default in RLGym obs?
@@ -127,19 +95,20 @@ class DefaultManager(GameManager):
         pass
 
     def show(self, matchup: DefaultMatchup):
-        states, steps = self._episode(*matchup)
+        env = self.SHOW
+        states, steps = self._episode(env, matchup)
 
         steps = len(states)
-        mode = self._get_gamemode(matchup[0].keys())
+        mode = self._get_gamemode(states[0])
         self.gamemode_exp[mode] += steps
 
     @staticmethod
-    def _get_gamemode(cars: Iterable[str]):
+    def _get_gamemode(state: GameState):
         b = o = 0
-        for key in cars:
-            if key.startswith("blue-"):
-                b += int(key.replace("blue-", ""))
+        for car in state.cars.values():
+            if car.is_blue:
+                b += 1
             else:
-                o += int(key.replace("orange-", ""))
+                o += 1
         mode = f"{min(b, o)}v{max(b, o)}"
         return mode
