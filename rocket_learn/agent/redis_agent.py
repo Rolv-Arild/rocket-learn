@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from redis import Redis
 
@@ -9,7 +9,7 @@ from rocket_learn.utils.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.redis.utils import encode_buffers, _serialize, ROLLOUTS
 
 
-def send_experience_buffers(redis: Redis, identifiers: list[str], experience_buffers: list[ExperienceBuffer],
+def send_experience_buffers(redis: Redis, identifiers: List[str], experience_buffers: List[ExperienceBuffer],
                             send_obs: bool, send_states: bool):
     rollout_data = encode_buffers(experience_buffers,
                                   return_obs=send_obs,

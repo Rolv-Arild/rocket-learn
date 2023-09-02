@@ -3,8 +3,8 @@ from typing import Any, Set, Dict, Tuple
 
 import numpy as np
 import torch
-from rlgym.utils.common_values import BLUE_TEAM
-from rlgym.utils.gamestates import GameState
+from rlgym.rocket_league.api import GameState
+from rlgym.rocket_league.common_values import BLUE_TEAM
 
 from rocket_learn.agent.policy import Policy
 from rocket_learn.agent.rocket_league_agent import RocketLeagueAgent

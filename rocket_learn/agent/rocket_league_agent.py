@@ -1,6 +1,6 @@
 from typing import Set, Dict, Any
 
-from rlgym.utils.gamestates import GameState
+from rlgym.rocket_league.api import GameState
 
 from rocket_learn.agent.agent import Agent
 

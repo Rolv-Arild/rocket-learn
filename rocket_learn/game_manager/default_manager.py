@@ -14,7 +14,7 @@ DefaultMatchup = List[Tuple[Agent, List[AgentID]]]
 class DefaultManager(GameManager):
     def __init__(self,
                  envs: Dict[int, RLGym],
-                 gamemode_weights: dict[str, float],
+                 gamemode_weights: Dict[str, float],
                  custom_objects: Optional[List[CustomObjectLogic]] = None,
                  display: Literal[None, "stochastic", "deterministic", "rollout"] = None,
                  ):
@@ -52,8 +52,7 @@ class DefaultManager(GameManager):
             state = env.state()
             all_states.append(state)
 
-            # End if there are no agents left
-            if not env.agents:
+            if all(terminated.values()) or all(truncated.values()):
                 break
 
         return all_states, total_agent_steps
@@ -65,7 +64,7 @@ class DefaultManager(GameManager):
         mode = self._get_gamemode(states[0])
         self.gamemode_exp[mode] += steps
 
-    def evaluate(self, matchup: DefaultMatchup) -> int:
+    def evaluate(self, matchup: DefaultMatchup):
         env = self.envs[self.EVAL]
 
         b = o = 0
