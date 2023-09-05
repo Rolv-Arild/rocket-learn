@@ -90,8 +90,10 @@ def encode_buffers(buffers: List[ExperienceBuffer], return_obs=True, return_stat
 
     actions = np.asarray([buffer.actions for buffer in buffers])
     log_probs = np.asarray([buffer.log_probs for buffer in buffers])
+    dones = np.asarray([buffer.dones for buffer in buffers])
     res.append(actions)
     res.append(log_probs)
+    res.append(dones)
 
     return res
 
@@ -118,15 +120,17 @@ def decode_buffers(enc_buffers, versions, has_obs, has_states, has_rewards,
     if has_rewards:
         rewards = enc_buffers[i]
         i += 1
-        dones = np.zeros_like(rewards, dtype=bool)  # TODO: Support for dones?
-        if len(dones) > 0:
-            dones[:, -1] = True
+        # dones = np.zeros_like(rewards, dtype=bool)  # TODO: Support for dones?
+        # if len(dones) > 0:
+        #     dones[:, -1] = True
     else:
         rewards = None
-        dones = None
+        # dones = None
     actions = enc_buffers[i]
     i += 1
     log_probs = enc_buffers[i]
+    i += 1
+    dones = enc_buffers[i]
     i += 1
 
     if obs is None:
