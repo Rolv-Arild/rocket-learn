@@ -371,7 +371,7 @@ class PPO:
                 values_pred = self.agent.critic(obs)
 
                 values_pred = th.squeeze(values_pred)
-                adv = ret - values_pred
+                adv = ret - values_pred.detach()
                 adv = (adv - th.mean(adv)) / (th.std(adv) + 1e-8)
 
                 # clipped surrogate loss
