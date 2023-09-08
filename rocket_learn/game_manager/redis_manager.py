@@ -22,6 +22,7 @@ class RedisManager(DefaultManager):
                  gamemode_weights: dict[str, float],
                  display: Literal[None, "stochastic", "deterministic", "rollout"] = None,
                  local_cache=None,
+                 full_team_rollouts=False,
                  full_team_evals=True,
                  target_sigma=1):
         super().__init__(env, gamemode_weights, display)
@@ -30,6 +31,7 @@ class RedisManager(DefaultManager):
         self.past_model_prob = past_model_prob
         self.eval_prob = eval_prob
 
+        self.full_team_rollouts = full_team_rollouts
         self.full_team_evals = full_team_evals
         self.target_sigma = target_sigma
 

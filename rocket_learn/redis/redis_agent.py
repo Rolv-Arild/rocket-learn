@@ -5,6 +5,7 @@ from redis import Redis
 
 from rocket_learn.agent.policy import Policy
 from rocket_learn.agent.torch_agent import TorchAgent
+from rocket_learn.redis.utils import RedisKeys
 from rocket_learn.utils.experience_buffer import ExperienceBuffer
 from rocket_learn.rollout_generator.redis.utils import encode_buffers, _serialize, ROLLOUTS
 
@@ -25,7 +26,7 @@ def send_experience_buffers(redis: Redis, identifiers: List[str], experience_buf
 
     # TODO async communication?
 
-    n_items = redis.rpush(ROLLOUTS, rollout_bytes)
+    n_items = redis.rpush(RedisKeys.ROLLOUTS, rollout_bytes)
     if n_items >= 1000:
         print("Had to limit rollouts. Learner may have have crashed, or is overloaded")
         redis.ltrim(ROLLOUTS, -100, -1)

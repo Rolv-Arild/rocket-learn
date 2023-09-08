@@ -86,8 +86,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             return
 
         if any(version < 0 for version in v_check):
-            buffers, states = decode_buffers(rollout_data, versions, has_obs, has_states, has_rewards,
-                                             obs_build_func, rew_build_func, act_build_func)
+            buffers, states = decode_buffers(rollout_data, versions)
         else:
             buffers = states = [None] * len(v_check)
 

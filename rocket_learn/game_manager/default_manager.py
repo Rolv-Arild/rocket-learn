@@ -31,7 +31,7 @@ class DefaultManager(GameManager):
         raise NotImplementedError
 
     @staticmethod
-    def _episode(env, matchup: DefaultMatchup):
+    def _episode(env, matchup: DefaultMatchup, record_states):
         observations = env.reset()
 
         total_agent_steps = 0
@@ -50,7 +50,8 @@ class DefaultManager(GameManager):
             observations, rewards, terminated, truncated = env.step(all_actions)
 
             state = env.state()
-            all_states.append(state)
+            if record_states:
+                all_states.append(state)
 
             if all(terminated.values()) or all(truncated.values()):
                 break

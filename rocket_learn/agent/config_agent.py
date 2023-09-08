@@ -7,7 +7,7 @@ from rlgym.utils.action_parsers import ActionParser
 from rlgym.utils.gamestates import GameState
 
 from rocket_learn.agent.policy import Policy
-from rocket_learn.agent.redis_agent import RedisAgent
+from rocket_learn.redis.redis_agent import RedisAgent
 
 
 class ConfigAgent(RedisAgent):
