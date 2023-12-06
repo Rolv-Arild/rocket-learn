@@ -494,7 +494,7 @@ class PPO:
         """
 
         version_str = str(self.logger.project) + "_" + str(current_step)
-        version_dir = save_location + "\\" + version_str
+        version_dir = os.path.join(save_location, version_str)
 
         os.makedirs(version_dir, exist_ok=current_step == -1)
 
@@ -505,11 +505,11 @@ class PPO:
             'critic_state_dict': self.agent.critic.state_dict(),
             'optimizer_state_dict': self.agent.optimizer.state_dict(),
             # TODO save/load reward normalization mean, std, count
-        }, version_dir + "\\checkpoint.pt")
+        }, os.path.join(version_dir, "checkpoint.pt"))
 
         if save_actor_jit:
             traced_actor = th.jit.trace(self.agent.actor, self.jit_tracer)
-            torch.jit.save(traced_actor, version_dir + "\\jit_policy.jit")
+            torch.jit.save(traced_actor, os.path.join(version_dir, "jit_policy.jit"))
 
     def freeze_policy(self, frozen_iterations=100):
         """
