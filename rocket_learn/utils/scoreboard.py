@@ -3,9 +3,9 @@ import random
 
 import numpy as np
 from numpy.random import poisson
-from rlgym.utils.common_values import BACK_WALL_Y, SIDE_WALL_X, GOAL_HEIGHT
+from rlgym_sim.utils.common_values import BACK_WALL_Y, SIDE_WALL_X, GOAL_HEIGHT
 
-from rlgym.utils.gamestates import GameState
+from rlgym_sim.utils.gamestates import GameState
 
 TICKS_PER_SECOND = 120
 SECONDS_PER_MINUTE = 60
@@ -49,31 +49,30 @@ class Scoreboard:
         self.modify_gamestate(initial_state)
 
     def step(self, state: GameState, update_scores=True):
-        if state != self.state:
-            if state.ball.position[1] != 0:  # Don't count during kickoffs
-                self.ticks_left = max(0, self.ticks_left - self.tick_skip)
+        if state.ball.position[1] != 0:  # Don't count during kickoffs
+            self.ticks_left = max(0, self.ticks_left - self.tick_skip)
 
-            if update_scores:
-                b, o = self.scoreline
-                changed = False
-                if state.blue_score > self.state.blue_score:  # Check in case of crash
-                    b += state.blue_score - self.state.blue_score
-                    changed = True
-                if state.orange_score > self.state.orange_score:
-                    o += state.orange_score - self.state.orange_score
-                    changed = True
-                tied = b == o
-                if self.is_overtime():
-                    if not tied:
-                        self.ticks_left = float("-inf")  # Finished
-                if self.ticks_left <= 0 and (state.ball.position[2] <= 110 or changed):
-                    if tied:
-                        self.ticks_left = float("inf")  # Overtime
-                    else:
-                        self.ticks_left = float("-inf")  # Finished
-                self.scoreline = b, o
+        if update_scores:
+            b, o = self.scoreline
+            changed = False
+            if state.blue_score > self.state.blue_score:  # Check in case of crash
+                b += state.blue_score - self.state.blue_score
+                changed = True
+            if state.orange_score > self.state.orange_score:
+                o += state.orange_score - self.state.orange_score
+                changed = True
+            tied = b == o
+            if self.is_overtime():
+                if not tied:
+                    self.ticks_left = float("-inf")  # Finished
+            if self.ticks_left <= 0 and (state.ball.position[2] <= 110 or changed):
+                if tied:
+                    self.ticks_left = float("inf")  # Overtime
+                else:
+                    self.ticks_left = float("-inf")  # Finished
+            self.scoreline = b, o
 
-            self.state = state
+        self.state = state
         self.modify_gamestate(state)
 
     def modify_gamestate(self, state: GameState):

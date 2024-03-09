@@ -1,26 +1,40 @@
+import copy
 import functools
 import itertools
-import os
-import time
-from threading import Thread
-from uuid import uuid4
-
 import sqlite3 as sql
+import time
+from typing import Union, List
+from uuid import uuid4
 
 import numpy as np
 from redis import Redis
-from rlgym.envs import Match
-from rlgym.gamelaunch import LaunchPreference
-from rlgym.gym import Gym
 from tabulate import tabulate
 
-import rocket_learn.agent.policy
+# import rocket_learn.agent.policy
 import rocket_learn.utils.generate_episode
 from rocket_learn.rollout_generator.redis.utils import _unserialize_model, MODEL_LATEST, WORKER_IDS, OPPONENT_MODELS, \
-    VERSION_LATEST, _serialize, ROLLOUTS, encode_buffers, decode_buffers, get_rating, LATEST_RATING_ID, \
+    VERSION_LATEST, _serialize, ROLLOUTS, encode_buffers, get_rating, LATEST_RATING_ID, \
     EXPERIENCE_PER_MODE
-from rocket_learn.utils.util import probability_NvsM
 from rocket_learn.utils.dynamic_gamemode_setter import DynamicGMSetter
+from rocket_learn.utils.multi_env import MultiEnvManager
+
+
+# def get_match(idx, env):
+#     return env._match  # noqa
+
+
+def make_setter_dynamic(idx, env):
+    setter = env._match._state_setter  # noqa
+    if not isinstance(setter, DynamicGMSetter):
+        env._match._state_setter = DynamicGMSetter(setter)  # noqa
+    # return env._match._state_setter.set_team_size  # noqa
+
+
+def change_team_size(idx, env, i, blue, orange):
+    if idx == i:
+        env._match._state_setter.set_team_size(blue, orange)  # noqa
+        return True
+    return False
 
 
 class RedisRolloutWorker:
@@ -46,13 +60,13 @@ class RedisRolloutWorker:
      :param gamemode_weights: dict of dynamic gamemode choice weights. If None, default equal experience
     """
 
-    def __init__(self, redis: Redis, name: str, match: Match,
+    def __init__(self, redis: Redis, name: str, make_params: (Union[dict, List[dict]]),
                  past_version_prob=.2, evaluation_prob=0.01, sigma_target=1,
                  dynamic_gm=True, streamer_mode=False, send_gamestates=True,
-                 send_obs=True, scoreboard=None, pretrained_agents=None,
-                 human_agent=None, force_paging=False, auto_minimize=True,
+                 send_obs=True, pretrained_agents=None,
+                 human_agent=None,
                  local_cache_name=None, gamemode_weights=None, full_team_evaluations=False,
-                 live_progress=True):
+                 live_progress=True, base_model=None, gpu_threshold=10):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -91,6 +105,10 @@ class RedisRolloutWorker:
 
         self.live_progress = live_progress
 
+        self.base_model = base_model
+
+        self.gpu_threshold = gpu_threshold
+
         self.uuid = str(uuid4())
         self.redis.rpush(WORKER_IDS, self.uuid)
 
@@ -111,16 +129,49 @@ class RedisRolloutWorker:
         else:
             print("Streaming mode set. Running silent.")
 
-        self.scoreboard = scoreboard
-        state_setter = DynamicGMSetter(match._state_setter)  # noqa Rangler made me do it
-        self.set_team_size = state_setter.set_team_size
-        match._state_setter = state_setter
-        self.match = match
-        self.env = Gym(match=self.match, pipe_id=os.getpid(), launch_preference=LaunchPreference.EPIC,
-                       use_injector=True, force_paging=force_paging, raise_on_crash=True, auto_minimize=auto_minimize)
+        # self.scoreboards = scoreboards
+
+        if isinstance(make_params, dict):
+            if make_params["use_multiprocessing"]:
+                envs = MultiEnvManager(make_params["env_creator"], make_params["num_envs"])
+                envs.send_function(make_setter_dynamic)
+                set_team_size_fns = []
+                for i in range(envs.num_envs):
+                    def set_team_size_fn(blue=None, orange=None, j=i):
+                        res = envs.send_function(functools.partial(change_team_size, i=j, blue=blue, orange=orange))
+                        assert any(res), str(res)
+
+                    set_team_size_fns.append(set_team_size_fn)
+                # matches = envs.send_function(get_match)
+            else:
+                envs = [make_params["env_creator"]() for _ in range(make_params["num_envs"])]
+                set_team_size_fns = []
+                for idx, env in enumerate(envs):
+                    make_setter_dynamic(idx, env)
+                    set_team_size_fns.append(env._match._state_setter.set_team_size)  # noqa
+        #     else:
+        #         make_params = [make_params]
+        # if isinstance(make_params, list):
+        #     envs = []
+        #     # matches = []
+        #     set_team_size_fns = []
+        #     for make_param in make_params:
+        #         state_setter = DynamicGMSetter(make_param["state_setter"])
+        #         set_team_size_fns.append(state_setter.set_team_size)
+        #         make_param["state_setter"] = state_setter
+        #         env = rlgym.make(**make_param)
+        #         envs.append(env)
+        #         # matches.append(env._match)  # noqa
+        # # else:
+        # #     raise ValueError
+        self.envs = envs
+        self.set_team_size_fns = set_team_size_fns
+
         self.total_steps_generated = 0
 
-    def _get_opponent_ids(self, n_new, n_old, pretrained_choice):
+    def _get_opponent_ids(self, n_new, n_old, pretrained_choice, force_eval=False):
+        from rocket_learn.utils.util import probability_NvsM
+
         # Get qualities
         assert (n_new + n_old) % 2 == 0
         per_team = (n_new + n_old) // 2
@@ -141,7 +192,7 @@ class RedisRolloutWorker:
             probs = np.clip(sigmas - self.sigma_target, a_min=0, a_max=None)
             s = probs.sum()
             if s == 0:  # No versions with high sigma available
-                if np.random.normal(0, self.sigma_target) > 1:
+                if force_eval:
                     # Some chance of doing a match with random versions, so they might correct themselves
                     probs = np.ones_like(probs) / len(probs)
                 else:
@@ -324,19 +375,25 @@ class RedisRolloutWorker:
             n += 1
             pretrained_choice = None
 
-            evaluate = np.random.random() < self.evaluation_prob
+            evaluate = (np.random.random() < self.evaluation_prob) + (np.random.normal(0, self.sigma_target) > 1)
 
-            if self.dynamic_gm:
-                blue, orange = self.select_gamemode(equal_likelihood=evaluate or self.streamer_mode)
-            elif self.match._spawn_opponents is False:
-                blue = self.match.agents
-                orange = 0
-            else:
-                blue = orange = self.match.agents // 2
-            self.set_team_size(blue, orange)
+            blues, oranges = [], []
+            for i in range(len(self.envs)):
+                num_agents = 6
+                if self.dynamic_gm:
+                    blue, orange = self.select_gamemode(equal_likelihood=evaluate or self.streamer_mode)
+                # elif True is False:  # noqa
+                #     blue = agents
+                #     orange = 0
+                else:
+                    blue = orange = num_agents // 2
+                self.set_team_size_fns[i](blue, orange)
+                blues.append(blue)
+                oranges.append(orange)
 
             if self.human_agent:
-                n_new = blue + orange - 1
+                assert len(self.envs) == 1
+                n_new = blues[0] + oranges[0] - 1
                 versions = ['na']
 
                 agents = [self.human_agent]
@@ -346,91 +403,152 @@ class RedisRolloutWorker:
 
                 versions = [v if v != -1 else latest_version for v in versions]
                 ratings = ["na"] * len(versions)
+                env_indices = [0] * len(versions)
             else:
                 # TODO customizable past agent selection, should team only be same agent?
-                agents, pretrained_choice, versions, ratings = self._generate_matchup(blue + orange,
-                                                                                      latest_version,
-                                                                                      pretrained_choice,
-                                                                                      evaluate)
+                agents = []
+                versions = []
+                ratings = []
+                env_indices = []
+                for env_index, (blue, orange) in enumerate(zip(blues, oranges)):
+                    a, pretrained_choice, v, r = self._generate_matchup(blue + orange,
+                                                                        latest_version,
+                                                                        pretrained_choice,
+                                                                        evaluate)
+                    agents.extend(a)
+                    versions.extend(v)
+                    ratings.extend(r)
+                    env_indices.extend([env_index] * len(v))
+
+            policy_indices = []
+            added = set()
+            for i, v in enumerate(versions):
+                if v not in added:
+                    policy_indices.append((agents[i], [j for j, v2 in enumerate(versions) if v2 == v]))
+                    added.add(v)
 
             evaluate = not any(isinstance(v, int) and v < 0 for v in versions)  # Might be changed in matchup code
 
-            table_str = self.make_table(versions, ratings, blue, orange, pretrained_choice)
+            table_str = ""
+            if len(self.envs) == 1:
+                table_str = self.make_table(versions, ratings, blues[0], oranges[0], pretrained_choice)
 
             if evaluate and not self.streamer_mode and self.human_agent is None:
                 print("EVALUATION GAME\n" + table_str)
-                result = rocket_learn.utils.generate_episode.generate_episode(self.env, agents, evaluate=True,
-                                                                              scoreboard=self.scoreboard,
-                                                                              progress=self.live_progress)
-                rollouts = []
-                print("Evaluation finished, goal differential:", result)
-                print()
+                results = rocket_learn.utils.generate_episode.generate_episode(self.envs, policy_indices, env_indices,
+                                                                               evaluate=True,
+                                                                               progress=self.live_progress,
+                                                                               base_model=self.base_model,
+                                                                               gpu_threshold=self.gpu_threshold)
+                rollout_collections = [[]] * len(self.envs)
+                if len(results) == 1:
+                    print("Evaluation finished, goal differential:", results[0])
+                    print()
+                k = 0
+                elements = []
+                assert len(blues) == len(oranges) == len(results)
+                for b, o, result in zip(blues, oranges, results):
+                    if any(rat.sigma > self.sigma_target for rat in ratings):
+                        continue
+                    elements.append(_serialize((versions[k:k + b], versions[k + b:k + b + o], result)))
+                    k += b + o
+                if len(elements) > 0:
+                    self.redis.rpush("eval-records", *elements)
             else:
                 if not self.streamer_mode:
                     print("ROLLOUT\n" + table_str)
 
                 try:
-                    rollouts, result = rocket_learn.utils.generate_episode.generate_episode(self.env, agents,
-                                                                                            evaluate=False,
-                                                                                            scoreboard=self.scoreboard,
-                                                                                            progress=self.live_progress)
+                    rollout_collections, results = \
+                        rocket_learn.utils.generate_episode.generate_episode(self.envs,
+                                                                             policy_indices,
+                                                                             env_indices,
+                                                                             evaluate=False,
+                                                                             progress=self.live_progress,
+                                                                             base_model=self.base_model,
+                                                                             gpu_threshold=self.gpu_threshold)
 
-                    if len(rollouts[0].observations) <= 1:  # Happens sometimes, unknown reason
+                    if len(rollout_collections) == 1 \
+                            and len(rollout_collections[0][0].observations) <= 1:  # Happens sometimes, unknown reason
                         print(" ** Rollout Generation Error: Restarting Generation ** ")
                         print()
                         continue
-                except EnvironmentError:
-                    self.env.attempt_recovery()
-                    continue
+                except EnvironmentError as e:
+                    raise e
+                    # for env in self.envs:
+                    #     env.attempt_recovery()
+                    # continue
 
-                state = rollouts[0].infos[-2]["state"]
-                goal_speed = np.linalg.norm(state.ball.linear_velocity) * 0.036  # kph
-                str_result = ('+' if result > 0 else "") + str(result)
-                episode_exp = len(rollouts[0].observations) * len(rollouts)
-                self.total_steps_generated += episode_exp
+                for rollouts, blue, orange in zip(rollout_collections, blues, oranges):
+                    episode_exp = len(rollouts[0].observations) * len(rollouts)
+                    self.total_steps_generated += episode_exp
 
-                if self.dynamic_gm and not evaluate:
-                    mode = f"{blue}v{orange}"
-                    if mode in self.gamemode_exp_per_episode_ema:
-                        current_mean = self.gamemode_exp_per_episode_ema[mode]
-                        self.gamemode_exp_per_episode_ema[mode] = 0.98 * current_mean + 0.02 * episode_exp
-                    else:
-                        self.gamemode_exp_per_episode_ema[mode] = episode_exp
+                    if self.dynamic_gm and not evaluate:
+                        mode = f"{blue}v{orange}"
+                        if mode in self.gamemode_exp_per_episode_ema:
+                            current_mean = self.gamemode_exp_per_episode_ema[mode]
+                            self.gamemode_exp_per_episode_ema[mode] = 0.98 * current_mean + 0.02 * episode_exp
+                        else:
+                            self.gamemode_exp_per_episode_ema[mode] = episode_exp
 
-                post_stats = f"Rollout finished after {len(rollouts[0].observations)} steps ({self.total_steps_generated} total steps), result was {str_result}"
-                if result != 0:
-                    post_stats += f", goal speed: {goal_speed:.2f} kph"
+                if len(rollout_collections) == 1:
+                    rollouts = rollout_collections[0]
+                    state = rollout_collections[0][0].infos[-2]["state"]
+                    goal_speed = np.linalg.norm(state.ball.linear_velocity) * 0.036  # kph
+                    str_result = ('+' if results[0] > 0 else "") + str(results[0])
+
+                    post_stats = f"Rollout finished after {len(rollouts[0].observations)} " \
+                                 f"steps ({self.total_steps_generated} total steps), result was {str_result}"
+                    if results[0] != 0:
+                        post_stats += f", goal speed: {goal_speed:.2f} kph"
+                else:
+                    steps = 0
+                    episodes = 0
+                    for rollouts in rollout_collections:
+                        for rollout in rollouts:
+                            steps += len(rollout.observations)
+                            episodes += 1
+                    post_stats = f"Generated {steps} steps across {episodes} episodes (timestamp={time.perf_counter()})"
 
                 if not self.streamer_mode:
                     print(post_stats)
                     print()
 
             if not self.streamer_mode:
-                rollout_data = encode_buffers(rollouts,
-                                              return_obs=self.send_obs,
-                                              return_states=self.send_gamestates,
-                                              return_rewards=True)
-                # sanity_check = decode_buffers(rollout_data, versions,
-                #                               has_obs=False, has_states=True, has_rewards=True,
-                #                               obs_build_factory=lambda: self.match._obs_builder,
-                #                               rew_func_factory=lambda: self.match._reward_fn,
-                #                               act_parse_factory=lambda: self.match._action_parser)
-                rollout_bytes = _serialize((rollout_data, versions, self.uuid, self.name, result,
-                                            self.send_obs, self.send_gamestates, True))
+                e = 0
+                for rollouts, result in zip(rollout_collections, results):
+                    if any(r.rewards[0] == 1 and len(r.rewards) > 1 and max(r.rewards) == min(r.rewards) == 1 for r in rollouts):
+                        print("Max reward of 1 detected")
+                        # breakpoint()
+                        continue
+                    rollout_data = encode_buffers(rollouts,
+                                                  return_obs=self.send_obs,
+                                                  return_states=self.send_gamestates,
+                                                  return_rewards=True)
+                    # sanity_check = decode_buffers(rollout_data, versions,
+                    #                               has_obs=False, has_states=True, has_rewards=True,
+                    #                               obs_build_factory=lambda: self.match._obs_builder,
+                    #                               rew_func_factory=lambda: self.match._reward_fn,
+                    #                               act_parse_factory=lambda: self.match._action_parser)
+                    v = [versions[i] for i in range(len(env_indices)) if env_indices[i] == e]
 
-                # while True:
-                # t.join()
+                    rollout_bytes = _serialize((rollout_data, v, self.uuid, self.name, result,
+                                                self.send_obs, self.send_gamestates, True))
 
-                def send():
-                    n_items = self.redis.rpush(ROLLOUTS, rollout_bytes)
-                    if n_items >= 1000:
-                        print("Had to limit rollouts. Learner may have have crashed, or is overloaded")
-                        self.redis.ltrim(ROLLOUTS, -100, -1)
+                    # while True:
+                    # t.join()
 
-                send()
-                # t = Thread(target=send)
-                # t.start()
-                # time.sleep(0.01)
+                    def send():
+                        n_items = self.redis.rpush(ROLLOUTS, rollout_bytes)
+                        if n_items >= 1000:
+                            print("Had to limit rollouts. Learner may have have crashed, or is overloaded")
+                            self.redis.ltrim(ROLLOUTS, -100, -1)
+
+                    send()
+                    # t = Thread(target=send)
+                    # t.start()
+                    # time.sleep(0.01)
+                    e += 1
 
     def _generate_matchup(self, n_agents, latest_version, pretrained_choice, evaluate):
         if evaluate:
@@ -449,7 +567,7 @@ class RedisRolloutWorker:
                         n_old = np.random.randint(low=1, high=n_agents)
                         break
         n_new = n_agents - n_old
-        versions, ratings = self._get_opponent_ids(n_new, n_old, pretrained_choice)
+        versions, ratings = self._get_opponent_ids(n_new, n_old, pretrained_choice, evaluate > 1)
         agents = []
         for version in versions:
             if version == -1:

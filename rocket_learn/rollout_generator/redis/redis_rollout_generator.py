@@ -1,4 +1,6 @@
 import itertools
+import os
+import time
 from collections import Counter
 from typing import Iterator, Callable, Optional, List
 
@@ -10,8 +12,12 @@ import wandb
 # from matplotlib.figure import Figure
 from redis import Redis
 from redis.exceptions import ResponseError
-from rlgym.utils import ObsBuilder, RewardFunction
-from rlgym.utils.action_parsers import ActionParser
+
+try:
+    from rlgym.utils import ObsBuilder, RewardFunction
+    from rlgym.utils.action_parsers import ActionParser
+except ModuleNotFoundError:
+    ObsBuilder = RewardFunction = ActionParser = None
 from trueskill import Rating, rate, SIGMA
 
 from rocket_learn.experience_buffer import ExperienceBuffer
@@ -103,6 +109,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             if isinstance(version, int) and version < 0:
                 if abs(version - latest_version) <= self.max_age:
                     relevant_buffers.append(buffer)
+                    if buffer is None:
+                        breakpoint()
                     self.contributors[name] += buffer.size()
                 else:
                     return []
@@ -269,9 +277,21 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         fig = go.Figure(fig_data)
         fig.update_layout(title="Rating", xaxis_title="Iteration", yaxis_title="TrueSkill")
 
-        self.logger.log({
-            "qualities": fig,
-        }, commit=False)
+        try:
+            self.logger.log({
+                "qualities": fig,
+            }, commit=False)
+        except FileNotFoundError:
+            from wandb.sdk.data_types._private import MEDIA_TMP  # noqa
+            os.makedirs(MEDIA_TMP.name, exist_ok=True)
+            try:
+                self.logger.log({
+                    "qualities": fig,
+                }, commit=False)
+            except FileNotFoundError:
+                # Give up
+                print("FileNotFoundError when plotting qualities")
+            # os.rmdir(MEDIA_TMP)
 
     def _add_opponent(self, agent):
         latest_id = self.redis.get(LATEST_RATING_ID)
@@ -312,10 +332,10 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.redis.decr(VERSION_LATEST)
 
         print("Top contributors:\n" + "\n".join(f"\t{c}: {n}" for c, n in self.contributors.most_common(5)))
-        self.logger.log({
-            "redis/contributors": wandb.Table(columns=["name", "steps"], data=self.contributors.most_common())},
-            commit=False
-        )
+        # self.logger.log({
+        #     "redis/contributors": wandb.Table(columns=["name", "steps"], data=self.contributors.most_common())},
+        #     commit=False
+        # )
         self._plot_ratings()
         tot_contributors = self.redis.hgetall(CONTRIBUTORS)
         tot_contributors = Counter({name: int(count) for name, count in tot_contributors.items()})

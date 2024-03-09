@@ -20,10 +20,11 @@ class DiscretePolicy(Policy):
         return logits
 
     def get_action_distribution(self, obs):
+        device = next(self.parameters()).device
         if isinstance(obs, np.ndarray):
-            obs = th.from_numpy(obs).float()
+            obs = th.from_numpy(obs).float().to(device)
         elif isinstance(obs, tuple):
-            obs = tuple(o if isinstance(o, th.Tensor) else th.from_numpy(o).float() for o in obs)
+            obs = tuple(o if isinstance(o, th.Tensor) else th.from_numpy(o).float().to(device) for o in obs)
 
         logits = self(obs)
 
@@ -67,5 +68,5 @@ class DiscretePolicy(Policy):
 
     def env_compatible(self, action):
         if isinstance(action, th.Tensor):
-            action = action.numpy()
+            action = action.cpu().numpy()
         return action

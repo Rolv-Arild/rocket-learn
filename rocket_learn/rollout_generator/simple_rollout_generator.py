@@ -16,7 +16,7 @@ class SimpleRolloutGenerator(BaseRolloutGenerator):
     def generate_rollouts(self) -> Iterator[ExperienceBuffer]:
         while True:
             # TODO: need to add selfplay agent here?
-            rollouts, result = generate_episode(self.env, [self.policy] * self.n_agents)
+            rollouts, result = generate_episode(self.env, [self.policy, list(range(self.n_agents))])
 
             yield from rollouts
 

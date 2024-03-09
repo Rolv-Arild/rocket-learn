@@ -1,5 +1,5 @@
-from rlgym.utils import StateSetter
-from rlgym.utils.state_setters import StateWrapper
+from rlgym_sim.utils import StateSetter
+from rlgym_sim.utils.state_setters import StateWrapper
 
 
 class DynamicGMSetter(StateSetter):

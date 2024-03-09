@@ -1,7 +1,7 @@
 from abc import ABC
 
-from rlgym.utils import TerminalCondition
-from rlgym.utils.gamestates import GameState
+from rlgym_sim.utils import TerminalCondition
+from rlgym_sim.utils.gamestates import GameState
 
 
 class TruncatedCondition(TerminalCondition, ABC):

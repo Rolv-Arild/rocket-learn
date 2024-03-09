@@ -1,6 +1,7 @@
 import numpy as np
 
 from rocket_learn.utils.gamestate_encoding import StateConstants
+from rocket_learn.utils.scoreboard import TICKS_PER_SECOND
 from rocket_learn.utils.stat_trackers.stat_tracker import StatTracker
 
 
@@ -29,10 +30,11 @@ class Speed(StatTracker):
 
 
 class Demos(StatTracker):
-    def __init__(self):
+    def __init__(self, tick_skip):
         super().__init__("average_demos")
         self.count = 0
         self.total_demos = 0
+        self.tick_skip = tick_skip
 
     def reset(self):
         self.count = 0
@@ -44,10 +46,13 @@ class Demos(StatTracker):
         demos = np.clip(players[-1, StateConstants.MATCH_DEMOLISHES] - players[0, StateConstants.MATCH_DEMOLISHES],
                         0, None)
         self.total_demos += np.sum(demos)
-        self.count += demos.size
+        self.count += players.size
 
     def get_stat(self):
-        return self.total_demos / (self.count or 1)
+        ticks = self.count
+        seconds = self.tick_skip * ticks / TICKS_PER_SECOND
+        minutes = seconds / 60
+        return self.total_demos / (minutes or 1)
 
 
 class TimeoutRate(StatTracker):
@@ -312,9 +317,9 @@ class GoalSpeed(StatTracker):
         goal_frames = (orange_diff > 0) | (blue_diff > 0)
 
         goal_speed = gamestates[goal_frames, StateConstants.BALL_LINEAR_VELOCITY]
-        goal_speed = np.linalg.norm(goal_speed, axis=-1).sum()
+        goal_speed = np.linalg.norm(goal_speed, axis=-1)
 
-        self.total_speed += goal_speed / 27.78  # convert to km/h
+        self.total_speed += goal_speed.sum() / 27.78  # convert to km/h
         self.count += goal_speed.size
 
     def get_stat(self):
@@ -362,10 +367,11 @@ class CarOnGround(StatTracker):
 
 
 class Saves(StatTracker):
-    def __init__(self):
+    def __init__(self, tick_skip):
         super().__init__("average_saves")
         self.count = 0
         self.total_saves = 0
+        self.tick_skip = tick_skip
 
     def reset(self):
         self.count = 0
@@ -377,17 +383,21 @@ class Saves(StatTracker):
         saves = np.clip(players[-1, StateConstants.MATCH_SAVES] - players[0, StateConstants.MATCH_SAVES],
                         0, None)
         self.total_saves += np.sum(saves)
-        self.count += saves.size
+        self.count += players.size
 
     def get_stat(self):
-        return self.total_saves / (self.count or 1)
+        ticks = self.count
+        seconds = self.tick_skip * ticks / TICKS_PER_SECOND
+        minutes = seconds / 60
+        return self.total_saves / (minutes or 1)
 
 
 class Shots(StatTracker):
-    def __init__(self):
+    def __init__(self, tick_skip):
         super().__init__("average_shots")
         self.count = 0
         self.total_shots = 0
+        self.tick_skip = tick_skip
 
     def reset(self):
         self.count = 0
@@ -399,7 +409,10 @@ class Shots(StatTracker):
         shots = np.clip(players[-1, StateConstants.MATCH_SHOTS] - players[0, StateConstants.MATCH_SHOTS],
                         0, None)
         self.total_shots += np.sum(shots)
-        self.count += shots.size
+        self.count += players.size
 
     def get_stat(self):
-        return self.total_shots / (self.count or 1)
+        ticks = self.count
+        seconds = self.tick_skip * ticks / TICKS_PER_SECOND
+        minutes = seconds / 60
+        return self.total_shots / (minutes or 1)

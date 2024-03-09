@@ -1,8 +1,8 @@
 from typing import Any, Union, Optional
 
 import numpy as np
-from rlgym.utils import ObsBuilder
-from rlgym.utils.gamestates import PlayerData, GameState
+from rlgym_sim.utils import ObsBuilder
+from rlgym_sim.utils.gamestates import PlayerData, GameState
 
 from rocket_learn.utils.gamestate_encoding import encode_gamestate
 from rocket_learn.utils.scoreboard import Scoreboard

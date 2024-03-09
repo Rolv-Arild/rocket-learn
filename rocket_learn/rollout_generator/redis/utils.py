@@ -5,7 +5,7 @@ from typing import List, Optional, Union, Dict
 
 import numpy as np
 from redis import Redis
-from rlgym.utils.gamestates import GameState
+from rlgym_sim.utils.gamestates import GameState
 from trueskill import Rating
 
 from rocket_learn.experience_buffer import ExperienceBuffer
@@ -37,7 +37,7 @@ m.patch()
 
 # Helper methods for easier changing of byte conversion
 def _serialize(obj):
-    return zlib.compress(msgpack.packb(obj))
+    return zlib.compress(msgpack.packb(obj), level=0)
 
 
 def _unserialize(obj):
@@ -77,7 +77,7 @@ def encode_buffers(buffers: List[ExperienceBuffer], return_obs=True, return_stat
     res = []
 
     if return_states:
-        states = np.asarray([encode_gamestate(info["state"]) for info in buffers[0].infos] if len(buffers) > 0 else [])
+        states = np.asarray([info["numpy_state"] for info in buffers[0].infos] if len(buffers) > 0 else [])
         res.append(states)
 
     if return_obs:
@@ -90,8 +90,10 @@ def encode_buffers(buffers: List[ExperienceBuffer], return_obs=True, return_stat
 
     actions = np.asarray([buffer.actions for buffer in buffers])
     log_probs = np.asarray([buffer.log_probs for buffer in buffers])
+    dones = np.asarray([buffer.dones for buffer in buffers])
     res.append(actions)
     res.append(log_probs)
+    res.append(dones)
 
     return res
 
@@ -118,15 +120,17 @@ def decode_buffers(enc_buffers, versions, has_obs, has_states, has_rewards,
     if has_rewards:
         rewards = enc_buffers[i]
         i += 1
-        dones = np.zeros_like(rewards, dtype=bool)  # TODO: Support for dones?
-        if len(dones) > 0:
-            dones[:, -1] = True
+        # dones = np.zeros_like(rewards, dtype=bool)  # TODO: Support for dones?
+        # if len(dones) > 0:
+        #     dones[:, -1] = True
     else:
         rewards = None
-        dones = None
+        # dones = None
     actions = enc_buffers[i]
     i += 1
     log_probs = enc_buffers[i]
+    i += 1
+    dones = enc_buffers[i]
     i += 1
 
     if obs is None:
