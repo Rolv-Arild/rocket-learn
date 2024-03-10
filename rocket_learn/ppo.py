@@ -246,7 +246,7 @@ class PPO:
         # advantage_tensors = []
         returns_tensors = []
 
-        rewards_tensors = []
+        # rewards_tensors = []
 
         dist_other_tensors = []
 
@@ -269,7 +269,7 @@ class PPO:
                 values = self.agent.critic(x).detach().cpu().numpy().flatten()  # No batching?
                 if self.kl_models_weights is not None:
                     for k, (model, kl_coef, half_life) in enumerate(self.kl_models_weights):
-                        dist_other = model.get_action_distribution(x).logits
+                        dist_other = model.get_action_distribution(x).logits.cpu()
                         dist_other_tensors.append(dist_other)
 
             actions = np.stack(buffer.actions)
@@ -287,7 +287,7 @@ class PPO:
             act_tensors.append(th.from_numpy(actions))
             log_prob_tensors.append(th.from_numpy(log_probs))
             returns_tensors.append(th.from_numpy(returns))
-            rewards_tensors.append(th.from_numpy(rewards))
+            # rewards_tensors.append(th.from_numpy(rewards))
 
             ep_rewards.append(rewards.sum())
             ep_steps.append(size)
@@ -313,6 +313,10 @@ class PPO:
 
         dist_other_tensor = th.cat(dist_other_tensors).float()
 
+        # Make sure everything is on CPU
+        assert all(t.device.type == "cpu" for t in (obs_tensor if isinstance(obs_tensor, tuple) else (obs_tensor,)))
+        assert all(t.device.type == "cpu" for t in (act_tensor, log_prob_tensor, returns_tensor, dist_other_tensor))
+
         tot_loss = 0
         tot_policy_loss = 0
         tot_entropy_loss = 0
@@ -330,6 +334,8 @@ class PPO:
 
         if self.frozen_iterations > 0:
             print("Policy network frozen, only updating value network...")
+
+        torch.cuda.empty_cache()
 
         precompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
         t0 = time.perf_counter_ns()
@@ -451,6 +457,8 @@ class PPO:
 
                 self.agent.optimizer.step()
                 self.agent.optimizer.zero_grad(set_to_none=self.zero_grads_with_none)
+
+            torch.cuda.empty_cache()
 
         t1 = time.perf_counter_ns()
 
