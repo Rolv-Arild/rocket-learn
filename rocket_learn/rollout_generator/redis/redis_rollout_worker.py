@@ -186,7 +186,7 @@ class RedisRolloutWorker:
         latest_rating = ratings[latest_key]
         keys, values = zip(*ratings.items())
 
-        is_eval = (n_new == 0 and len(values) >= n_old)
+        is_eval = (n_new == 0 and (len(values) >= n_old or (self.full_team_evaluations and len(values) >= 2)))
         if is_eval:  # Evaluation game, try to find agents with high sigma
             sigmas = np.array([r.sigma for r in values])
             probs = np.clip(sigmas - self.sigma_target, a_min=0, a_max=None)
@@ -375,7 +375,8 @@ class RedisRolloutWorker:
             n += 1
             pretrained_choice = None
 
-            evaluate = (np.random.random() < self.evaluation_prob) + (np.random.normal(0, self.sigma_target) > 1)
+            evaluate = ((np.random.random() < self.evaluation_prob)
+                        * (1 + (np.random.normal(0, self.sigma_target) > 1)))
 
             blues, oranges = [], []
             for i in range(len(self.envs)):
@@ -406,19 +407,25 @@ class RedisRolloutWorker:
                 env_indices = [0] * len(versions)
             else:
                 # TODO customizable past agent selection, should team only be same agent?
-                agents = []
-                versions = []
-                ratings = []
-                env_indices = []
-                for env_index, (blue, orange) in enumerate(zip(blues, oranges)):
-                    a, pretrained_choice, v, r = self._generate_matchup(blue + orange,
-                                                                        latest_version,
-                                                                        pretrained_choice,
-                                                                        evaluate)
-                    agents.extend(a)
-                    versions.extend(v)
-                    ratings.extend(r)
-                    env_indices.extend([env_index] * len(v))
+                while True:
+                    agents = []
+                    versions = []
+                    ratings = []
+                    env_indices = []
+                    for env_index, (blue, orange) in enumerate(zip(blues, oranges)):
+                        a, pretrained_choice, v, r = self._generate_matchup(blue + orange,
+                                                                            latest_version,
+                                                                            pretrained_choice,
+                                                                            evaluate)
+                        agents.extend(a)
+                        versions.extend(v)
+                        ratings.extend(r)
+                        env_indices.extend([env_index] * len(v))
+                    all_old = not any(isinstance(v, int) and v < 0 for v in versions)
+                    if evaluate and not all_old:
+                        evaluate = 0
+                        continue
+                    break
 
             policy_indices = []
             added = set()
@@ -427,7 +434,10 @@ class RedisRolloutWorker:
                     policy_indices.append((agents[i], [j for j, v2 in enumerate(versions) if v2 == v]))
                     added.add(v)
 
-            evaluate = not any(isinstance(v, int) and v < 0 for v in versions)  # Might be changed in matchup code
+            if self.past_version_prob > 0 and not evaluate and any(p.deterministic for p, idx in policy_indices):
+                breakpoint()
+            if self.past_version_prob == 0 and not evaluate and len(added) > 1:
+                breakpoint()
 
             table_str = ""
             if len(self.envs) == 1:
@@ -521,6 +531,8 @@ class RedisRolloutWorker:
                         print("Max reward of 1 detected")
                         # breakpoint()
                         continue
+                    if evaluate and any(len(r) > 0 for r in rollouts):
+                        breakpoint()
                     rollout_data = encode_buffers(rollouts,
                                                   return_obs=self.send_obs,
                                                   return_states=self.send_gamestates,
@@ -540,7 +552,7 @@ class RedisRolloutWorker:
 
                     def send():
                         n_items = self.redis.rpush(ROLLOUTS, rollout_bytes)
-                        if n_items >= 1000:
+                        if n_items >= 500:
                             print("Had to limit rollouts. Learner may have have crashed, or is overloaded")
                             self.redis.ltrim(ROLLOUTS, -100, -1)
 

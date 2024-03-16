@@ -423,6 +423,7 @@ class PPO:
                         print("\tPolicy loss:", policy_loss)
                         print("\tEntropy loss:", entropy_loss)
                         print("\tValue loss:", value_loss)
+                        print("\tKL loss:", kl_loss)
                         print("\tTotal loss:", loss)
                         print("\tRatio:", ratio)
                         print("\tAdv:", adv)

@@ -324,7 +324,6 @@ def generate_episode(envs: Gym, policy_indices: List[Tuple["Policy", List[int]]]
             if isinstance(envs, list):
                 e = 0
                 for env, done, info in zip(envs, dones, infos):
-                    game_condition = env._match._terminal_conditions[0]  # noqa
                     if not is_finished[e] and done is not None and done > 0:
                         results[e] += info["result"]
                         if info["result"] > 0:
@@ -333,17 +332,21 @@ def generate_episode(envs: Gym, policy_indices: List[Tuple["Policy", List[int]]]
                             orange += 1
 
                         if not evaluate:
-                            is_finished[e] = True
-                        elif game_condition.done:
+                            if (info["result"] == 0) != (done >= 2):
+                                breakpoint()
                             is_finished[e] = True
                         else:
-                            o, i = env.reset(return_info=True)
-                            infos[e] = i
-                            a = 0
-                            for agent_idx, env_idx in enumerate(env_indices):
-                                if env_idx == e:
-                                    observations[agent_idx] = o[a]
-                                    a += 1
+                            game_condition = env._match._terminal_conditions[0]  # noqa
+                            if game_condition.done:
+                                is_finished[e] = True
+                            else:
+                                o, i = env.reset(return_info=True)
+                                infos[e] = i
+                                a = 0
+                                for agent_idx, env_idx in enumerate(env_indices):
+                                    if env_idx == e:
+                                        observations[agent_idx] = o[a]
+                                        a += 1
                     e += 1
             else:
                 responses = envs.send_function(functools.partial(check_if_finished,
