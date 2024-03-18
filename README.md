@@ -36,9 +36,10 @@ If you *don't* yet have these, rocket-learn will add a large amount of complexit
 
 1) Get [Redis](https://docs.servicestack.net/install-redis-windows) running
 
-*__Improper Redis setup can leave your computer extremely vulnerable to Bad Guys. We are not responsible for your computer's safety. We assume you know what you are doing.__*
+> [!WARNING]
+> Improper Redis setup can leave your computer extremely vulnerable to Bad Guys. We are not responsible for your computer's safety. We assume you know what you are doing.
 
-2) Clone the repo
+1) Clone the repo
 
 ```shell
 git clone https://github.com/Rolv-Arild/rocket-learn.git
