@@ -7,6 +7,7 @@ from typing import Union, List
 from uuid import uuid4
 
 import numpy as np
+import redis
 from redis import Redis
 from tabulate import tabulate
 
@@ -263,7 +264,7 @@ class RedisRolloutWorker:
                 return [-1] * (n_new + n_old), [latest_rating] * (n_new + n_old)
             k = np.random.choice(len(matchups), p=qualities / s)
             return [-1 if i == -1 else keys[i] for i in matchups[k]], \
-                   [latest_rating if i == -1 else values[i] for i in matchups[k]]
+                [latest_rating if i == -1 else values[i] for i in matchups[k]]
 
     @functools.lru_cache(maxsize=8)
     def _get_past_model(self, version):
@@ -445,7 +446,9 @@ class RedisRolloutWorker:
 
             if evaluate and not self.streamer_mode and self.human_agent is None:
                 print("EVALUATION GAME\n" + table_str)
-                results = rocket_learn.utils.generate_episode.generate_episode(self.envs, policy_indices, env_indices,
+                results = rocket_learn.utils.generate_episode.generate_episode(self.envs,
+                                                                               policy_indices,
+                                                                               env_indices,
                                                                                evaluate=True,
                                                                                progress=self.live_progress,
                                                                                base_model=self.base_model,
@@ -477,12 +480,6 @@ class RedisRolloutWorker:
                                                                              progress=self.live_progress,
                                                                              base_model=self.base_model,
                                                                              gpu_threshold=self.gpu_threshold)
-
-                    if len(rollout_collections) == 1 \
-                            and len(rollout_collections[0][0].observations) <= 1:  # Happens sometimes, unknown reason
-                        print(" ** Rollout Generation Error: Restarting Generation ** ")
-                        print()
-                        continue
                 except EnvironmentError as e:
                     raise e
                     # for env in self.envs:
@@ -543,6 +540,9 @@ class RedisRolloutWorker:
                     #                               rew_func_factory=lambda: self.match._reward_fn,
                     #                               act_parse_factory=lambda: self.match._action_parser)
                     v = [versions[i] for i in range(len(env_indices)) if env_indices[i] == e]
+
+                    if len(v) != len(rollouts):
+                        breakpoint()
 
                     rollout_bytes = _serialize((rollout_data, v, self.uuid, self.name, result,
                                                 self.send_obs, self.send_gamestates, True))

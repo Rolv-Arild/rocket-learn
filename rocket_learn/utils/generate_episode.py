@@ -78,7 +78,7 @@ def check_if_finished(idx, env, dones, is_finished, evaluate):
             return o, i
 
 
-def generate_episode(envs: Gym, policy_indices: List[Tuple["Policy", List[int]]], env_indices, evaluate=False,
+def generate_episode(envs: List[Gym], policy_indices: List[Tuple["Policy", List[int]]], env_indices, evaluate=False,
                      progress=False, base_model=None, gpu_threshold=10) -> (List["ExperienceBuffer"], int):
     """
     create experience buffer data by interacting with the environment(s)
