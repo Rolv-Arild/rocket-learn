@@ -7,7 +7,6 @@ from typing import Union, List
 from uuid import uuid4
 
 import numpy as np
-import redis
 from redis import Redis
 from tabulate import tabulate
 
@@ -426,6 +425,11 @@ class RedisRolloutWorker:
                     if evaluate and not all_old:
                         evaluate = 0
                         continue
+                    if not evaluate and all_old:
+                        breakpoint()
+                    if (all(isinstance(v, int) and v < 0 for v in versions)
+                            and not all(a == self.current_agent for a in agents)):
+                        breakpoint()
                     break
 
             policy_indices = []
@@ -524,7 +528,8 @@ class RedisRolloutWorker:
             if not self.streamer_mode:
                 e = 0
                 for rollouts, result in zip(rollout_collections, results):
-                    if any(r.rewards[0] == 1 and len(r.rewards) > 1 and max(r.rewards) == min(r.rewards) == 1 for r in rollouts):
+                    if any(r.rewards[0] == 1 and len(r.rewards) > 1 and max(r.rewards) == min(r.rewards) == 1 for r in
+                           rollouts):
                         print("Max reward of 1 detected")
                         # breakpoint()
                         continue
@@ -541,7 +546,7 @@ class RedisRolloutWorker:
                     #                               act_parse_factory=lambda: self.match._action_parser)
                     v = [versions[i] for i in range(len(env_indices)) if env_indices[i] == e]
 
-                    if len(v) != len(rollouts):
+                    if not evaluate and len(v) != len(rollouts):
                         breakpoint()
 
                     rollout_bytes = _serialize((rollout_data, v, self.uuid, self.name, result,

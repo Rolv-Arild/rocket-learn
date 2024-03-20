@@ -389,9 +389,12 @@ class PPO:
                     adv = ret - values_pred.detach()
                     adv = (adv - th.mean(adv)) / (th.std(adv) + 1e-8)
 
+                    clip_hi = 1 + self.clip_range
+                    clip_lo = 1 / clip_hi
+
                     # clipped surrogate loss
                     policy_loss_1 = adv * ratio
-                    policy_loss_2 = adv * th.clamp(ratio, 1 - self.clip_range, 1 + self.clip_range)
+                    policy_loss_2 = adv * th.clamp(ratio, clip_lo, clip_hi)
                     policy_loss = -torch.min(policy_loss_1, policy_loss_2).mean()
 
                     # **If we want value clipping, add it here**
@@ -448,7 +451,7 @@ class PPO:
                     tot_policy_loss += policy_loss.item()
                     tot_entropy_loss += entropy_loss.item()
                     tot_value_loss += value_loss.item()
-                    tot_clipped += th.mean((th.abs(ratio - 1) > self.clip_range).float()).item()
+                    tot_clipped += th.mean(((ratio < clip_lo) | (ratio > clip_hi)).float()).item()
                     n += 1
                     # pb.update(self.minibatch_size)
 
