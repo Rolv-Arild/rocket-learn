@@ -332,7 +332,7 @@ def generate_episode(envs: List[Gym], policy_indices: List[Tuple["Policy", List[
                             orange += 1
 
                         if not evaluate:
-                            if (info["result"] == 0) != (done >= 2):
+                            if (info["result"] == 0) != (done == 2):
                                 breakpoint()
                             is_finished[e] = True
                         else:

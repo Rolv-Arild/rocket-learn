@@ -439,7 +439,7 @@ class RedisRolloutWorker:
                     policy_indices.append((agents[i], [j for j, v2 in enumerate(versions) if v2 == v]))
                     added.add(v)
 
-            if self.past_version_prob > 0 and not evaluate and any(p.deterministic for p, idx in policy_indices):
+            if self.past_version_prob == 0 and not evaluate and any(p.deterministic for p, idx in policy_indices):
                 breakpoint()
             if self.past_version_prob == 0 and not evaluate and len(added) > 1:
                 breakpoint()

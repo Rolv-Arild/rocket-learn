@@ -374,10 +374,11 @@ class PPO:
                     # TODO optimization: use forward_actor_critic instead of separate in case shared, also use GPU
                     try:
                         log_prob, entropy, dist = self.evaluate_actions(obs, act)  # Assuming obs and actions as input
-                    except ValueError as e:
-                        print("ValueError in evaluate_actions", e)
+                    except ValueError as err:
+                        print("ValueError in evaluate_actions", err)
                         continue
-                    except RuntimeError as e:
+
+                    except RuntimeError as err:
                         breakpoint()
                         continue
 
@@ -413,7 +414,8 @@ class PPO:
                                 kl_coef *= 0.5 ** (self.total_steps / half_life)
                             dist_other = th.distributions.Categorical(
                                 logits=dist_other_batch[i: j].to(self.device))
-                            div = kl_divergence(dist_other, dist).mean()
+                            divs = kl_divergence(dist_other, dist)
+                            div = divs.mean()
                             tot_kl_other_models[k] += div
                             tot_kl_coeffs[k] = kl_coef
                             kl_loss += kl_coef * div
@@ -441,6 +443,7 @@ class PPO:
                                 print(f"\tObs[{j}] has inf:", not obs[j].isfinite().all())
                         else:
                             print("\tObs has inf:", not obs.isfinite().all())
+                        breakpoint()
                         continue
 
                     loss.backward()
@@ -471,7 +474,7 @@ class PPO:
         postcompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
 
         log_dict = {
-            "ppo/loss": tot_loss / n,
+            "ppo/loss": tot_loss / n,  # TODO adjust for minibatch size changes
             "ppo/policy_loss": tot_policy_loss / n,
             "ppo/entropy_loss": tot_entropy_loss / n,
             "ppo/value_loss": tot_value_loss / n,
