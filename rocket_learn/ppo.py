@@ -337,6 +337,7 @@ class PPO:
 
         torch.cuda.empty_cache()
 
+        samples_from_latest = 0
         precompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
         t0 = time.perf_counter_ns()
         self.agent.optimizer.zero_grad(set_to_none=self.zero_grads_with_none)
@@ -383,6 +384,9 @@ class PPO:
                         continue
 
                     ratio = torch.exp(log_prob - old_log_prob)
+
+                    if n == 0:
+                        samples_from_latest += ((ratio - 1).abs() < 1e-8).sum()
 
                     values_pred = self.agent.critic(obs)
 
@@ -482,6 +486,7 @@ class PPO:
             "ppo/clip_fraction": tot_clipped / n,
             "ppo/epoch_time": (t1 - t0) / (1e6 * self.epochs),
             "ppo/update_magnitude": th.dist(precompute, postcompute, p=2),
+            "ppo/latest_model_ratio": samples_from_latest / self.minibatch_size,
         }
 
         if self.kl_models_weights is not None and len(self.kl_models_weights) > 0:
