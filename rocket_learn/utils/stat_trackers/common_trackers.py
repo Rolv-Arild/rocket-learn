@@ -416,3 +416,29 @@ class Shots(StatTracker):
         seconds = self.tick_skip * ticks / TICKS_PER_SECOND
         minutes = seconds / 60
         return self.total_shots / (minutes or 1)
+
+
+class BoostUsage(StatTracker):
+    def __init__(self, tick_skip):
+        super().__init__("boost_per_minute")
+        self.count = 0
+        self.usage = 0
+        self.tick_skip = tick_skip
+
+    def reset(self):
+        self.count = 0
+        self.usage = 0
+
+    def update(self, gamestates: np.ndarray, mask: np.ndarray):
+        players = gamestates[:, StateConstants.PLAYERS]  # Shape: (n_ticks, n_players * n_features)
+        boost = players[:, StateConstants.BOOST_AMOUNT]  # Shape: (n_ticks, n_players)
+        is_limited = (0 <= boost) & (boost <= 1)
+        boost_diff = np.diff(boost[is_limited], axis=0)  # Shape: (n_ticks - 1, n_players)
+        self.usage += np.sum(boost_diff[boost_diff < 0])  # If it
+        self.count += boost_diff.size
+
+    def get_stat(self):
+        ticks = self.count
+        seconds = self.tick_skip * ticks / TICKS_PER_SECOND
+        minutes = seconds / 60
+        return self.usage / (minutes or 1)
