@@ -297,7 +297,9 @@ class RedisRolloutWorker:
         if equal_likelihood:
             mode = np.random.choice(modes)
         else:
-            dist = np.array(list(mode_exp.values())) + 1
+            dist = np.array(list(mode_exp.values()), dtype=float)  # Cast to float to prevent overflow
+            if np.any(dist == 0):
+                dist[:] = 1
             dist = dist / dist.sum()
             if self.gamemode_weights is None:
                 target_dist = np.ones(len(modes))
