@@ -68,6 +68,7 @@ class PPO:
         self.device = device
         self.zero_grads_with_none = zero_grads_with_none
         self.frozen_iterations = 0
+        self.warmup = None
         self._saved_lr = None
 
         self.starting_iteration = 0
@@ -178,6 +179,10 @@ class PPO:
                     assert self._saved_lr is not None
                     self.agent.optimizer.param_groups[0]["lr"] = self._saved_lr
                     self._saved_lr = None
+                elif self.warmup is not None:
+                    assert self._saved_lr is not None
+                    progress = 1 - (self.frozen_iterations - 1) / self.warmup
+                    self.agent.optimizer.param_groups[0]["lr"] = self._saved_lr * progress
 
                 self.frozen_iterations -= 1
 
@@ -552,13 +557,14 @@ class PPO:
             traced_actor = th.jit.trace(self.agent.actor, self.jit_tracer)
             torch.jit.save(traced_actor, version_dir + "\\jit_policy.jit")
 
-    def freeze_policy(self, frozen_iterations=100):
+    def freeze_policy(self, frozen_iterations=100, warmup=False):
         """
         Freeze policy network to allow value network to settle. Useful with pretrained policy networks.
 
         Note that network weights will not be transmitted when frozen.
 
         :param frozen_iterations: how many iterations the policy update will remain unchanged
+        :param warmup: if True, start learning rate at 0 and increase to original value over frozen_iterations
         """
 
         print("-------------------------------------------------------------")
@@ -566,6 +572,7 @@ class PPO:
         print("-------------------------------------------------------------")
 
         self.frozen_iterations = frozen_iterations
+        self.warmup = None if not warmup else frozen_iterations
 
         self._saved_lr = self.agent.optimizer.param_groups[0]["lr"]
         self.agent.optimizer.param_groups[0]["lr"] = 0
