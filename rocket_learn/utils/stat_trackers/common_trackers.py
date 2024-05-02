@@ -216,7 +216,7 @@ class GamemodeSpecificTracker(StatTracker):
 
     def update(self, gamestates: np.ndarray, mask: np.ndarray):
         players = gamestates[0, StateConstants.PLAYERS]
-        teams = players[0, StateConstants.TEAM_NUMS]
+        teams = players[StateConstants.TEAM_NUMS]
         if (teams == 0).sum() in self.gamemode and (teams == 1).sum() in self.gamemode:
             self.tracker.update(gamestates, mask)
 
