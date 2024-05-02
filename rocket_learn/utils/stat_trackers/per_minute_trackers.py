@@ -19,10 +19,10 @@ class DemosPerMinute(StatTracker):
     def update(self, gamestates: np.ndarray, mask: np.ndarray):
         players = gamestates[:, StateConstants.PLAYERS]
         demos = players[:, StateConstants.MATCH_DEMOLISHES]
+        self.count += demos.size
         demos = np.clip(demos[-1] - demos[0],
                         0, None)
         self.total_demos += np.sum(demos)
-        self.count += demos.size
 
     def get_stat(self):
         ticks = self.count
@@ -71,10 +71,10 @@ class SavesPerMinute(StatTracker):
         players = gamestates[:, StateConstants.PLAYERS]
 
         saves = players[:, StateConstants.MATCH_SAVES]
+        self.count += saves.size
         saves = np.clip(saves[-1] - saves[0],
                         0, None)
         self.total_saves += np.sum(saves)
-        self.count += saves.size
 
     def get_stat(self):
         ticks = self.count
@@ -98,10 +98,10 @@ class ShotsPerMinute(StatTracker):
         players = gamestates[:, StateConstants.PLAYERS]
 
         shots = players[:, StateConstants.MATCH_SHOTS]
+        self.count += shots.size
         shots = np.clip(shots[-1] - shots[0],
                         0, None)
         self.total_shots += np.sum(shots)
-        self.count += shots.size
 
     def get_stat(self):
         ticks = self.count
