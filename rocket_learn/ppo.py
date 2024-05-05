@@ -181,7 +181,7 @@ class PPO:
                     self._saved_lr = None
                 elif self.warmup is not None:
                     assert self._saved_lr is not None
-                    progress = 1 - (self.frozen_iterations - 1) / self.warmup
+                    progress = self.warmup(self.frozen_iterations)
                     self.agent.optimizer.param_groups[0]["lr"] = self._saved_lr * progress
 
                 self.frozen_iterations -= 1
@@ -279,7 +279,7 @@ class PPO:
 
             actions = np.stack(buffer.actions)
             log_probs = np.stack(buffer.log_probs)
-            rewards = np.stack(buffer.rewards)
+            rewards = np.stack(buffer.rewards).astype(np.float32)
             dones = np.stack(buffer.dones)
 
             size = rewards.shape[0]
@@ -557,14 +557,14 @@ class PPO:
             traced_actor = th.jit.trace(self.agent.actor, self.jit_tracer)
             torch.jit.save(traced_actor, version_dir + "\\jit_policy.jit")
 
-    def freeze_policy(self, frozen_iterations=100, warmup=False):
+    def freeze_policy(self, frozen_iterations=100, warmup=None):
         """
         Freeze policy network to allow value network to settle. Useful with pretrained policy networks.
 
         Note that network weights will not be transmitted when frozen.
 
         :param frozen_iterations: how many iterations the policy update will remain unchanged
-        :param warmup: if True, start learning rate at 0 and increase to original value over frozen_iterations
+        :param warmup: a function defining how the learning rate should change over the frozen iterations
         """
 
         print("-------------------------------------------------------------")
@@ -572,7 +572,7 @@ class PPO:
         print("-------------------------------------------------------------")
 
         self.frozen_iterations = frozen_iterations
-        self.warmup = None if not warmup else frozen_iterations
+        self.warmup = warmup
 
         self._saved_lr = self.agent.optimizer.param_groups[0]["lr"]
         self.agent.optimizer.param_groups[0]["lr"] = 0
