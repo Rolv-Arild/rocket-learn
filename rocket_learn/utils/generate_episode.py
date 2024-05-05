@@ -152,7 +152,7 @@ def generate_episode(envs: List[Gym], policy_indices: List[Tuple["Policy", List[
 
     # rollouts for all latest_policies
     rollouts = [
-        ExperienceBuffer(infos=[infos[env_indices[i]]])
+        ExperienceBuffer(observations=[observations[i]], infos=[infos[env_indices[i]]])
         for i in range(len(env_indices))
     ]
 
@@ -234,7 +234,7 @@ def generate_episode(envs: List[Gym], policy_indices: List[Tuple["Policy", List[
             # all_actions = all_actions[sorted_idx]
             # all_action_indices = all_action_indices[sorted_idx]
             # all_log_probs = all_log_probs[sorted_idx]
-            old_obs = observations
+            # old_obs = observations
 
             if isinstance(envs, list):
                 observations = [None] * n_agents
@@ -292,7 +292,10 @@ def generate_episode(envs: List[Gym], policy_indices: List[Tuple["Policy", List[
                         continue
                     # if abs(rew) > 1:
                     #     print(rew)
-                    obs = old_obs[agent_idx]
+
+                    # NOTE: We're adding the obs from the "next" step.
+                    # Since initial obs is added at the start of the episode obs and rewards are correctly aligned
+                    obs = observations[agent_idx]
                     exp_buf = rollouts[agent_idx]
 
                     act = all_action_indices[agent_idx]
