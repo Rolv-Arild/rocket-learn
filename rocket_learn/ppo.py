@@ -286,7 +286,7 @@ class PPO:
 
             advantages = self._calculate_advantages_numba(rewards, values, self.gamma, self.gae_lambda, dones[-1] == 2)
 
-            returns = advantages + values
+            returns = advantages + values[:-1]
 
             obs_tensors.append(obs_tensor)
             act_tensors.append(th.from_numpy(actions))
