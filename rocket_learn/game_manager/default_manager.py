@@ -4,8 +4,6 @@ from rlgym.api import RLGym, AgentID
 from rlgym.rocket_league.api import GameState
 
 from rocket_learn.agent.agent import Agent
-from rocket_learn.custom_objects.custom_object_logic import CustomObjectLogic
-from rocket_learn.custom_objects.scoreboard.util import TICKS_PER_SECOND
 from rocket_learn.game_manager.game_manager import GameManager
 
 DefaultMatchup = List[Tuple[Agent, List[AgentID]]]
@@ -15,7 +13,6 @@ class DefaultManager(GameManager):
     def __init__(self,
                  envs: Dict[int, RLGym],
                  gamemode_weights: Dict[str, float],
-                 custom_objects: Optional[List[CustomObjectLogic]] = None,
                  display: Literal[None, "stochastic", "deterministic", "rollout"] = None,
                  ):
         super(DefaultManager, self).__init__(envs)

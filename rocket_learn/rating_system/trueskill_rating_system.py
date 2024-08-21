@@ -1,5 +1,5 @@
 import numpy as np
-from trueskill import Rating, TrueSkill
+from trueskill import Rating, TrueSkill, global_env
 
 from rocket_learn.rating_system.rating_system import RatingSystem
 
@@ -34,7 +34,6 @@ class TrueSkillRatingSystem(RatingSystem):
 
 
 def win_probability(team1_ratings, team2_ratings, env=None):
-    from trueskill import global_env
     # Trueskill extension, source: https://github.com/sublee/trueskill/pull/17
     """Calculates the win probability of the first team over the second team.
     :param team1_ratings: ratings of the first team participants.

@@ -3,6 +3,7 @@ import random
 import numpy as np
 
 from rocket_learn.rating_system.rating_system import RatingSystem
+from scipy.stats.distributions import beta
 
 
 class NaiveRatingSystem(RatingSystem):
@@ -39,7 +40,6 @@ class NaiveRatingSystem(RatingSystem):
         return wins / total
 
     def get_beta_dist(self):
-        from scipy.stats.distributions import beta
         record = np.array([[
             [self.losses[(k1, k2)], self.wins[(k1, k2)]]
             for k1 in sorted(self.versions)]

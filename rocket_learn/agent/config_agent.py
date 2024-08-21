@@ -1,65 +1,41 @@
-from typing import Any, Set, Dict
+from typing import Dict, Any, List
 
-import numpy as np
-from redis import Redis
-from rlgym.utils import ObsBuilder, RewardFunction
-from rlgym.utils.action_parsers import ActionParser
-from rlgym.utils.gamestates import GameState
-
-from rocket_learn.agent.policy import Policy
-from rocket_learn.redis.redis_agent import RedisAgent
+from rocket_learn.agent.agent import Agent
+from rlgym.api.config import ObsBuilder, ActionParser, RewardFunction
+from rlgym.api import StateType, AgentID, EngineActionType, ObsType, ActionType
 
 
-class ConfigAgent(RedisAgent):
-    def __init__(self, policy: Policy, redis: Redis,
-                 obs_builder: ObsBuilder, reward_function: RewardFunction, action_parser: ActionParser,
-                 send_obs: bool = True, send_states: bool = True):
-        super().__init__(policy, redis, send_obs, send_states)
+class ConfigAgent(Agent):
+    def __init__(self, obs_builder: ObsBuilder, action_parser: ActionParser, reward_function: RewardFunction):
         self.obs_builder = obs_builder
-        self.reward_function = reward_function
         self.action_parser = action_parser
+        self.reward_function = reward_function
+        self.done_agents = set()
+        self.rewards = []
 
-    def build_observations(self, state: GameState, cars):
-        cars = list(cars)
+    def reset(self, agents: List[AgentID], initial_state: StateType, shared_info: Dict[str, Any]):
+        self.obs_builder.reset(agents, initial_state, shared_info)
+        self.action_parser.reset(agents, initial_state, shared_info)
+        self.reward_function.reset(agents, initial_state, shared_info)
+        self.rewards.clear()
 
-        self.obs_builder.pre_step(state)
-        self.reward_function.pre_step(state)
-
-        all_obs = []
-
-        for car in cars:
-            idx = self._car_to_index[car]
-            player = state.players[idx]
-
-            prev_action = self._previous_actions.get(car, np.zeros(8))
-            obs = self.obs_builder.build_obs(player, state, prev_action)
-            all_obs.append(obs)
-
-        return all_obs
-
-    def assign_rewards(self, state: GameState, cars):
-        self.obs_builder.pre_step(state)
-        self.reward_function.pre_step(state)
-
-        all_rewards = []
-
-        for car in cars:
-            idx = self._car_to_index[car]
-            player = state.players[idx]
-
-            prev_action = self._previous_actions.get(car, np.zeros(8))
-            rew = self.reward_function.get_reward(player, state, prev_action)
-            all_rewards.append(rew)
-
-        return all_rewards
-
-    def parse_actions(self, actions: Any, state: GameState):
-        return self.action_parser.parse_actions(actions, state)
-
-    def reset(self, initial_state: Any, agents: Set[str]):
-        self.obs_builder.reset(initial_state)
-        self.reward_function.reset(initial_state)
-        super(ConfigAgent, self).reset(initial_state, agents)
-
-    def end(self, final_state: Any, truncated: Dict[str, bool]):
+    def infer(self, obs: Dict[AgentID, ObsType], is_terminated: Dict[AgentID, bool], is_truncated: Dict[AgentID, bool],
+              shared_info: Dict[str, Any]) -> Dict[AgentID, ActionType]:
         raise NotImplementedError
+
+    def act(self, agents: List[AgentID], state: StateType,
+            is_terminated: Dict[AgentID, bool], is_truncated: Dict[AgentID, bool],
+            shared_info: Dict[str, Any]) -> Dict[AgentID, EngineActionType]:
+        agents = [agent for agent in agents if agent not in self.done_agents]
+        rewards = self.reward_function.get_rewards(agents, state, is_terminated, is_truncated, shared_info)
+        self.rewards.append(rewards)
+
+        for agent in agents:
+            if is_terminated[agent] or is_truncated[agent]:
+                self.done_agents.add(agent)
+                agents = [a for a in agents if a != agent]  # Slightly inefficient but only done once per agent per ep
+
+        obs = self.obs_builder.build_obs(agents, state, shared_info)
+        actions = self.infer(obs, is_terminated, is_truncated, shared_info)
+        engine_actions = self.action_parser.parse_actions(actions, state, shared_info)
+        return engine_actions

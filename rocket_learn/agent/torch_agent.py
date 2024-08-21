@@ -1,86 +1,48 @@
-from abc import ABC
-from typing import Any, Set, Dict, Tuple
+from typing import Dict, Any, List
 
-import numpy as np
 import torch
-from rlgym.rocket_league.api import GameState
-from rlgym.rocket_league.common_values import BLUE_TEAM
+from rlgym.api import AgentID, ObsType, ActionType, StateType
+from rlgym.api.config import ObsBuilder, ActionParser, RewardFunction
+from tensordict import TensorDict
+from torchrl.data import TensorDictReplayBuffer, LazyTensorStorage
+from torchrl.modules import ProbabilisticActor
 
-from rocket_learn.agent.policy import Policy
-from rocket_learn.agent.rocket_league_agent import RocketLeagueAgent
-from rocket_learn.utils.experience_buffer import ExperienceBuffer
-from rocket_learn.custom_objects.scoreboard.scoreboard import Scoreboard
+from rocket_learn.agent.config_agent import ConfigAgent
 
 
-class TorchAgent(RocketLeagueAgent, ABC):
-    def __init__(self, policy: Policy):
-        super().__init__(True)
-        self.policy = policy
-        self._previous_actions = {}
-        self._car_to_index = {}
-        self._experience_buffers = {}
+class TorchPPOAgent(ConfigAgent):
+    def __init__(self, actor: ProbabilisticActor,
+                 obs_builder: ObsBuilder,
+                 action_parser: ActionParser,
+                 reward_function: RewardFunction):
+        super().__init__(obs_builder, action_parser, reward_function)
+        self.actor = actor.eval()
+        self.experience_buffers = {}
 
-    def build_observations(self, state: GameState, cars):
-        raise NotImplementedError
+    def reset(self, agents: List[AgentID], initial_state: StateType, shared_info: Dict[str, Any]):
+        super().reset(agents, initial_state, shared_info)
+        self.experience_buffers = {k: TensorDictReplayBuffer(storage=LazyTensorStorage(max_size=1000))
+                                   for k in agents}
 
-    def assign_rewards(self, state: GameState, cars):
-        raise NotImplementedError
+    @torch.no_grad()
+    def infer(self, obs: Dict[AgentID, ObsType], is_terminated: Dict[AgentID, bool], is_truncated: Dict[AgentID, bool],
+              shared_info: Dict[str, Any]) -> Dict[AgentID, ActionType]:
+        agents, observations = zip(*obs.items())
+        agents = list(agents)
+        observations = list(observations)
+        output = self.actor(observations)
 
-    def parse_actions(self, actions: Any, state: GameState):
-        raise NotImplementedError
+        actions = output["action"].cpu().numpy()
 
-    def reset(self, initial_state: GameState, agents: Set[str]):
-        car_to_index = {}
-        b = o = 0
-        for i, player in enumerate(initial_state.players):
-            if player.team_num == BLUE_TEAM:
-                player_car = f"blue-{b}"
-                b += 1
-            else:
-                player_car = f"orange-{o}"
-                o += 1
-            car_to_index = {player_car: b + o - 1}
-        self._car_to_index = car_to_index
-        self._experience_buffers = {c: ExperienceBuffer() for c in agents}
+        for agent in agents:
+            exp = self.experience_buffers[agent]
+            term = is_terminated[agent]
+            exp.add(TensorDict({
+                "obs": observations[agent],
+                "action": actions[agent],
+                "reward": self.rewards[-1],
+                "done": term or is_truncated[agent],
+                "terminated": term
+            }))
 
-    def run_model(self, all_obs):
-        dists = self.policy.get_action_distribution(all_obs)
-        action_indices = self.policy.sample_action(dists)
-        log_probs = self.policy.log_prob(dists, action_indices)
-
-        return action_indices, log_probs
-
-    def act(self, agents_observations: Dict[str, Tuple[GameState, Scoreboard]]) -> Dict[str, np.ndarray]:
-        cars = list(agents_observations.keys())
-        # The assumption is that all cars will share the same object
-        state = next(iter(agents_observations.values()))
-
-        all_obs = self.build_observations(state, cars)
-        all_rewards = self.assign_rewards(state, cars)
-
-        if isinstance(all_obs[0], tuple):
-            all_obs = tuple(
-                torch.from_numpy(np.vstack(o for o in zip(*all_obs))).float()
-            )
-        else:
-            all_obs = torch.from_numpy(np.vstack(all_obs)).float()
-
-        action_indices, log_probs = self.run_model(all_obs)
-
-        actions = self.parse_actions(action_indices, state)
-
-        self._previous_actions = dict(zip(cars, actions))
-
-        for i, car in enumerate(cars):
-            exp_buffer: ExperienceBuffer = self._experience_buffers[car]
-            exp_buffer.add_step(all_obs[i], action_indices[i], all_rewards[i], False, False, log_probs[i], None)
-
-        return dict(zip(cars, actions))
-
-    def end(self, final_state: GameState, truncated: Dict[str, bool]):
-        for car, exp_buffer in self._experience_buffers.items():
-            exp_buffer: ExperienceBuffer
-            if truncated[car]:
-                exp_buffer.truncated[-1] = True
-            else:
-                exp_buffer.terminated[-1] = True
+        return {ag: ac for ag, ac in zip(agents, actions)}

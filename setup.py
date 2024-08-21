@@ -10,12 +10,18 @@ Learning!
 
 setup(
    name='rocket_learn',
-   version='0.2.6',
+   version='1.0.0a0',
    description='Rocket Learn',
    author='Rolv-Arild Braaten, Daniel Downs',
    url='https://github.com/Rolv-Arild/rocket-learn',
    packages=[package for package in find_packages() if package.startswith("rocket_learn")],
    long_description=long_description,
-   install_requires=['cloudpickle==1.6.0', 'gym', 'torch', 'tqdm', 'trueskill',
-                     'msgpack_numpy', 'wandb', 'tabulate'],
+   install_requires=[
+      'rlgym-rocket-league[sim]>=2.0.0rc0',
+      'rlgym-api>=2.0.0rc0',
+      'rlgym-tools>=2.0.0rc0',
+      'torch',
+      'torchrl',
+      'tensordict'
+   ],
 )
