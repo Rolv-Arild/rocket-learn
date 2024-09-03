@@ -64,6 +64,17 @@ def conditional_stack(data):
         raise ValueError(f"Unsupported type: {type(d0)}")
 
 
+def transform_batch(batch, fn):
+    if isinstance(batch, tuple):
+        return tuple(fn(t) for t in batch)
+    elif isinstance(batch, list):
+        return [fn(t) for t in batch]
+    elif isinstance(batch, dict):
+        return {k: fn(v) for k, v in batch.items()}
+    else:
+        return fn(batch)
+
+
 def make_table(versions, ratings, blue, orange, pretrained_choice):
     version_info = []
     for v, r in zip(versions, ratings):
