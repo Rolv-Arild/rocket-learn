@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 from rlgym.api import ObsBuilder, SharedInfoProvider
@@ -11,35 +11,45 @@ from rocket_learn.utils.util import conditional_stack
 
 
 def make_bc_dataset(replay_paths: List[str], output_dir: str,
-                    obs_builder: ObsBuilder, shared_info_provider: SharedInfoProvider,
+                    obs_builder: ObsBuilder,
+                    shared_info_provider: Optional[SharedInfoProvider],
                     action_options: np.ndarray,
-                    label_smoothing: bool = False):
+                    label_smoothing: bool = False,
+                    overwrite: bool = False):
     output_dir = Path(output_dir)
     pbar = tqdm(replay_paths, "Processing replays")
     for replay_path in pbar:
         replay_path = Path(replay_path)
+        replay_id = replay_path.stem
+        out_path = output_dir / f"{replay_id}.npz"
+        if not overwrite and out_path.exists():
+            continue
         parsed_replay = ParsedReplay.load(replay_path)
         iterator = replay_to_rlgym(parsed_replay)
 
         all_observations = {}
         all_actions = {}
-        do_reset = True
-        shared_info = shared_info_provider.create({})
+        episode_ids = []
+        steps = []
+        step = 0
+        episode_id = 0
+        shared_info = shared_info_provider.create({}) if shared_info_provider is not None else {}
         for replay_frame in iterator:
             game_state = replay_frame.state
             replay_actions = replay_frame.actions
             scoreboard = replay_frame.scoreboard
             agent_ids = list(game_state.cars.keys())
-            if do_reset:
-                shared_info_provider.set_state(agent_ids, game_state, shared_info)
+            if step == 0:
+                if shared_info_provider is not None:
+                    shared_info_provider.set_state(agent_ids, game_state, shared_info)
                 obs_builder.reset(agent_ids, game_state, shared_info)
-                do_reset = False
                 for agent_id in agent_ids:
                     all_observations[agent_id] = []
                     all_actions[agent_id] = []
 
-            shared_info_provider.step(agent_ids, game_state, shared_info)
-            shared_info["scoreboard"] = scoreboard  # Might overwrite, but this should be more accurate
+            shared_info["scoreboard"] = scoreboard
+            if shared_info_provider is not None:
+                shared_info_provider.step(agent_ids, game_state, shared_info)
             observations = obs_builder.build_obs(agent_ids, game_state, shared_info)
 
             for agent_id in agent_ids:
@@ -58,10 +68,20 @@ def make_bc_dataset(replay_paths: List[str], output_dir: str,
 
                 all_actions[agent_id].append(action)
 
-            if scoreboard.go_to_kickoff:
-                do_reset = True
+            episode_ids.append(episode_id)
+            steps.append(step)
 
-        for agent_id in all_observations.keys():
-            np.savez_compressed(output_dir / f"{replay_path.stem}_{agent_id}.npz",
-                                obs=conditional_stack(all_observations[agent_id]),
-                                action=np.stack(all_actions[agent_id]))
+            if scoreboard.go_to_kickoff:
+                step = 0
+                episode_id += 1
+            else:
+                step += 1
+
+        np.savez_compressed(
+            out_path,
+            observations={k: conditional_stack(v) for k, v in all_observations.items()},
+            actions={k: conditional_stack(v) for k, v in all_actions.items()},
+            episode_ids=episode_ids,
+            steps=steps,
+            replay_id=replay_id
+        )
