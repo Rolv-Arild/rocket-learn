@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-from tabulate import tabulate
 
 try:
     import numba
@@ -76,6 +75,8 @@ def transform_batch(batch, fn):
 
 
 def make_table(versions, ratings, blue, orange, pretrained_choice):
+    from tabulate import tabulate
+
     version_info = []
     for v, r in zip(versions, ratings):
         if pretrained_choice is not None and v == 'na':  # print name but don't send it back
