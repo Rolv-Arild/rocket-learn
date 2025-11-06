@@ -68,6 +68,7 @@ class PPO:
         self.device = device
         self.zero_grads_with_none = zero_grads_with_none
         self.frozen_iterations = 0
+        self.warmup = None
         self._saved_lr = None
 
         self.starting_iteration = 0
@@ -173,6 +174,10 @@ class PPO:
                     assert self._saved_lr is not None
                     self.agent.optimizer.param_groups[0]["lr"] = self._saved_lr
                     self._saved_lr = None
+                elif self.warmup is not None:
+                    assert self._saved_lr is not None
+                    progress = self.warmup(self.frozen_iterations)
+                    self.agent.optimizer.param_groups[0]["lr"] = self._saved_lr * progress
 
                 self.frozen_iterations -= 1
 
@@ -268,14 +273,14 @@ class PPO:
 
             actions = np.stack(buffer.actions)
             log_probs = np.stack(buffer.log_probs)
-            rewards = np.stack(buffer.rewards)
+            rewards = np.stack(buffer.rewards).astype(np.float32)
             dones = np.stack(buffer.dones)
 
             size = rewards.shape[0]
 
             advantages = self._calculate_advantages_numba(rewards, values, self.gamma, self.gae_lambda, dones[-1] == 2)
 
-            returns = advantages + values
+            returns = advantages + values[:-1]
 
             obs_tensors.append(obs_tensor)
             act_tensors.append(th.from_numpy(actions))
@@ -592,13 +597,14 @@ class PPO:
             traced_actor = th.jit.trace(self.agent.actor, self.jit_tracer)
             torch.jit.save(traced_actor, version_dir + "\\jit_policy.jit")
 
-    def freeze_policy(self, frozen_iterations=100):
+    def freeze_policy(self, frozen_iterations=100, warmup=None):
         """
         Freeze policy network to allow value network to settle. Useful with pretrained policy networks.
 
         Note that network weights will not be transmitted when frozen.
 
         :param frozen_iterations: how many iterations the policy update will remain unchanged
+        :param warmup: a function defining how the learning rate should change over the frozen iterations
         """
 
         print("-------------------------------------------------------------")
@@ -606,6 +612,7 @@ class PPO:
         print("-------------------------------------------------------------")
 
         self.frozen_iterations = frozen_iterations
+        self.warmup = warmup
 
         self._saved_lr = self.agent.optimizer.param_groups[0]["lr"]
         self.agent.optimizer.param_groups[0]["lr"] = 0

@@ -1,11 +1,10 @@
 import numpy as np
 
 from rocket_learn.utils.gamestate_encoding import StateConstants
-from rocket_learn.utils.scoreboard import TICKS_PER_SECOND
 from rocket_learn.utils.stat_trackers.stat_tracker import StatTracker
 
 
-class Speed(StatTracker):
+class AverageSpeed(StatTracker):
     def __init__(self):
         super().__init__("average_speed")
         self.count = 0
@@ -29,77 +28,9 @@ class Speed(StatTracker):
         return self.total_speed / (self.count or 1)
 
 
-class Demos(StatTracker):
-    def __init__(self, tick_skip):
-        super().__init__("average_demos")
-        self.count = 0
-        self.total_demos = 0
-        self.tick_skip = tick_skip
-
-    def reset(self):
-        self.count = 0
-        self.total_demos = 0
-
-    def update(self, gamestates: np.ndarray, mask: np.ndarray):
-        players = gamestates[:, StateConstants.PLAYERS]
-
-        demos = np.clip(players[-1, StateConstants.MATCH_DEMOLISHES] - players[0, StateConstants.MATCH_DEMOLISHES],
-                        0, None)
-        self.total_demos += np.sum(demos)
-        self.count += players.size
-
-    def get_stat(self):
-        ticks = self.count
-        seconds = self.tick_skip * ticks / TICKS_PER_SECOND
-        minutes = seconds / 60
-        return self.total_demos / (minutes or 1)
-
-
-class TimeoutRate(StatTracker):
+class AverageEpisodeLength(StatTracker):
     def __init__(self):
-        super().__init__("timeout_rate")
-        self.count = 0
-        self.total_timeouts = 0
-
-    def reset(self):
-        self.count = 0
-        self.total_timeouts = 0
-
-    def update(self, gamestates: np.ndarray, mask: np.ndarray):
-        orange_diff = gamestates[-1, StateConstants.ORANGE_SCORE] - gamestates[0, StateConstants.ORANGE_SCORE]
-        blue_diff = gamestates[-1, StateConstants.BLUE_SCORE] - gamestates[0, StateConstants.BLUE_SCORE]
-
-        self.total_timeouts += ((orange_diff == 0) & (blue_diff == 0)).item()
-        self.count += 1
-
-    def get_stat(self):
-        return self.total_timeouts / (self.count or 1)
-
-
-class Touch(StatTracker):
-    def __init__(self):
-        super().__init__("touch_rate")
-        self.count = 0
-        self.total_touches = 0
-
-    def reset(self):
-        self.count = 0
-        self.total_touches = 0
-
-    def update(self, gamestates: np.ndarray, mask: np.ndarray):
-        players = gamestates[:, StateConstants.PLAYERS]
-        is_touch = players[:, StateConstants.BALL_TOUCHED]
-
-        self.total_touches += np.sum(is_touch)
-        self.count += is_touch.size
-
-    def get_stat(self):
-        return self.total_touches / (self.count or 1)
-
-
-class EpisodeLength(StatTracker):
-    def __init__(self):
-        super().__init__("episode_length")
+        super().__init__("average_episode_length")
         self.count = 0
         self.total_length = 0
 
@@ -115,7 +46,7 @@ class EpisodeLength(StatTracker):
         return self.total_length / (self.count or 1)
 
 
-class Boost(StatTracker):
+class AverageBoost(StatTracker):
     def __init__(self):
         super().__init__("average_boost")
         self.count = 0
@@ -137,33 +68,9 @@ class Boost(StatTracker):
         return self.total_boost / (self.count or 1)
 
 
-class BehindBall(StatTracker):
+class AverageTouchHeight(StatTracker):
     def __init__(self):
-        super().__init__("behind_ball_rate")
-        self.count = 0
-        self.total_behind = 0
-
-    def reset(self):
-        self.count = 0
-        self.total_behind = 0
-
-    def update(self, gamestates: np.ndarray, mask: np.ndarray):
-        players = gamestates[:, StateConstants.PLAYERS]
-        ball_y = gamestates[:, StateConstants.BALL_POSITION.start + 1]
-        player_y = players[:, StateConstants.CAR_POS_Y]
-        is_orange = players[:, StateConstants.TEAM_NUMS]
-        behind = (2 * is_orange - 1) * (ball_y.reshape(-1, 1) - player_y) < 0
-
-        self.total_behind += np.sum(behind)
-        self.count += behind.size
-
-    def get_stat(self):
-        return self.total_behind / (self.count or 1)
-
-
-class TouchHeight(StatTracker):
-    def __init__(self):
-        super().__init__("touch_height")
+        super().__init__("average_touch_height")
         self.count = 0
         self.total_height = 0
 
@@ -183,9 +90,9 @@ class TouchHeight(StatTracker):
         return self.total_height / (self.count or 1)
 
 
-class DistToBall(StatTracker):
+class AverageDistToBall(StatTracker):
     def __init__(self):
-        super().__init__("distance_to_ball")
+        super().__init__("average_distance_to_ball")
         self.count = 0
         self.total_dist = 0.0
 
@@ -211,53 +118,7 @@ class DistToBall(StatTracker):
         return self.total_dist / (self.count or 1)
 
 
-class AirTouch(StatTracker):
-    def __init__(self):
-        super().__init__("air_touch_rate")
-        self.count = 0
-        self.total_touches = 0
-
-    def reset(self):
-        self.count = 0
-        self.total_touches = 0
-
-    def update(self, gamestates: np.ndarray, mask: np.ndarray):
-        players = gamestates[:, StateConstants.PLAYERS]
-        is_touch = np.asarray([a * b for a, b in
-                               zip(players[:, StateConstants.BALL_TOUCHED],
-                                   np.invert(players[:, StateConstants.ON_GROUND].astype(bool)))])
-
-        self.total_touches += np.sum(is_touch)
-        self.count += is_touch.size
-
-    def get_stat(self):
-        return self.total_touches / (self.count or 1)
-
-
-class AirTouchHeight(StatTracker):
-    def __init__(self):
-        super().__init__("air_touch_height")
-        self.count = 0
-        self.total_height = 0
-
-    def reset(self):
-        self.count = 0
-        self.total_height = 0
-
-    def update(self, gamestates: np.ndarray, mask: np.ndarray):
-        players = gamestates[:, StateConstants.PLAYERS]
-        ball_z = gamestates[:, StateConstants.BALL_POSITION.start + 2]
-        touch_heights = ball_z[players[:, StateConstants.BALL_TOUCHED].any(axis=1)]
-        touch_heights = touch_heights[touch_heights >= 175]  # remove dribble touches and below
-
-        self.total_height += np.sum(touch_heights)
-        self.count += touch_heights.size
-
-    def get_stat(self):
-        return self.total_height / (self.count or 1)
-
-
-class BallSpeed(StatTracker):
+class AverageBallSpeed(StatTracker):
     def __init__(self):
         super().__init__("average_ball_speed")
         self.count = 0
@@ -280,9 +141,9 @@ class BallSpeed(StatTracker):
         return self.total_speed / (self.count or 1)
 
 
-class BallHeight(StatTracker):
+class AverageBallHeight(StatTracker):
     def __init__(self):
-        super().__init__("ball_height")
+        super().__init__("average_ball_height")
         self.count = 0
         self.total_height = 0
 
@@ -300,9 +161,9 @@ class BallHeight(StatTracker):
         return self.total_height / (self.count or 1)
 
 
-class GoalSpeed(StatTracker):
+class AverageGoalSpeed(StatTracker):
     def __init__(self):
-        super().__init__("avg_goal_speed")
+        super().__init__("average_goal_speed")
         self.count = 0
         self.total_speed = 0
 
@@ -326,119 +187,38 @@ class GoalSpeed(StatTracker):
         return self.total_speed / (self.count or 1)
 
 
-class MaxGoalSpeed(StatTracker):
+class TotalSteps(StatTracker):
     def __init__(self):
-        super().__init__("max_goal_speed")
-        self.max_speed = 0
-
-    def reset(self):
-        self.max_speed = 0
-
-    def update(self, gamestates: np.ndarray, mask: np.ndarray):
-        if gamestates.ndim > 1 and len(gamestates) > 1:
-            end = gamestates[-2]
-            ball_speeds = end[StateConstants.BALL_LINEAR_VELOCITY]
-            goal_speed = float(np.linalg.norm(ball_speeds)) / 27.78  # convert to km/h
-
-            self.max_speed = max(float(self.max_speed), goal_speed)
-
-    def get_stat(self):
-        return self.max_speed
-
-
-class CarOnGround(StatTracker):
-    def __init__(self):
-        super().__init__("pct_car_on_ground")
+        super().__init__("total_steps")
         self.count = 0
-        self.total_ground = 0.0
 
     def reset(self):
         self.count = 0
-        self.total_ground = 0.0
-
-    def update(self, gamestates: np.ndarray, mask: np.ndarray):
-        on_ground = gamestates[:, StateConstants.ON_GROUND]
-
-        self.total_ground += np.sum(on_ground)
-        self.count += on_ground.size
-
-    def get_stat(self):
-        return 100 * self.total_ground / (self.count or 1)
-
-
-class Saves(StatTracker):
-    def __init__(self, tick_skip):
-        super().__init__("average_saves")
-        self.count = 0
-        self.total_saves = 0
-        self.tick_skip = tick_skip
-
-    def reset(self):
-        self.count = 0
-        self.total_saves = 0
-
-    def update(self, gamestates: np.ndarray, mask: np.ndarray):
-        players = gamestates[:, StateConstants.PLAYERS]
-
-        saves = np.clip(players[-1, StateConstants.MATCH_SAVES] - players[0, StateConstants.MATCH_SAVES],
-                        0, None)
-        self.total_saves += np.sum(saves)
-        self.count += players.size
-
-    def get_stat(self):
-        ticks = self.count
-        seconds = self.tick_skip * ticks / TICKS_PER_SECOND
-        minutes = seconds / 60
-        return self.total_saves / (minutes or 1)
-
-
-class Shots(StatTracker):
-    def __init__(self, tick_skip):
-        super().__init__("average_shots")
-        self.count = 0
-        self.total_shots = 0
-        self.tick_skip = tick_skip
-
-    def reset(self):
-        self.count = 0
-        self.total_shots = 0
-
-    def update(self, gamestates: np.ndarray, mask: np.ndarray):
-        players = gamestates[:, StateConstants.PLAYERS]
-
-        shots = np.clip(players[-1, StateConstants.MATCH_SHOTS] - players[0, StateConstants.MATCH_SHOTS],
-                        0, None)
-        self.total_shots += np.sum(shots)
-        self.count += players.size
-
-    def get_stat(self):
-        ticks = self.count
-        seconds = self.tick_skip * ticks / TICKS_PER_SECOND
-        minutes = seconds / 60
-        return self.total_shots / (minutes or 1)
-
-
-class BoostUsage(StatTracker):
-    def __init__(self, tick_skip):
-        super().__init__("boost_per_minute")
-        self.count = 0
-        self.usage = 0
-        self.tick_skip = tick_skip
-
-    def reset(self):
-        self.count = 0
-        self.usage = 0
 
     def update(self, gamestates: np.ndarray, mask: np.ndarray):
         players = gamestates[:, StateConstants.PLAYERS]  # Shape: (n_ticks, n_players * n_features)
-        boost = players[:, StateConstants.BOOST_AMOUNT]  # Shape: (n_ticks, n_players)
-        is_limited = (0 <= boost) & (boost <= 1)
-        boost_diff = np.diff(boost[is_limited], axis=0)  # Shape: (n_ticks - 1, n_players)
-        self.usage += np.sum(boost_diff[boost_diff < 0])  # If it
-        self.count += boost_diff.size
+        car_ids = players[:, StateConstants.CAR_IDS]  # Shape: (n_ticks, n_players)
+        self.count += car_ids.size
 
     def get_stat(self):
-        ticks = self.count
-        seconds = self.tick_skip * ticks / TICKS_PER_SECOND
-        minutes = seconds / 60
-        return self.usage / (minutes or 1)
+        return self.count
+
+
+class GamemodeSpecificTracker(StatTracker):
+    def __init__(self, tracker: StatTracker, gamemode: str):
+        self.gamemode = tuple(sorted(int(x) for x in gamemode.split("v")))
+        gamemode = "v".join(str(x) for x in self.gamemode)
+        self.tracker = tracker
+        super().__init__(f"{gamemode}/{tracker.name}")
+
+    def reset(self):
+        self.tracker.reset()
+
+    def update(self, gamestates: np.ndarray, mask: np.ndarray):
+        players = gamestates[0, StateConstants.PLAYERS]
+        teams = players[StateConstants.TEAM_NUMS]
+        if (teams == 0).sum() in self.gamemode and (teams == 1).sum() in self.gamemode:
+            self.tracker.update(gamestates, mask)
+
+    def get_stat(self):
+        return self.tracker.get_stat()
