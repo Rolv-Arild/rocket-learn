@@ -1,6 +1,6 @@
 import os
 import time
-from typing import Iterator, List, Tuple, Union
+from typing import Iterator, List, Tuple, Union, Callable
 
 import numba
 import numpy as np
@@ -58,7 +58,7 @@ class PPO:
             logger=None,
             device="cuda",
             zero_grads_with_none=False,
-            kl_models_weights: List[Union[Tuple[Policy, float], Tuple[Policy, float, float]]] = None
+            kl_models_weights: List[Tuple[Policy, Callable[[int], float]]] = None
     ):
         self.rollout_generator = rollout_generator
 
@@ -97,11 +97,6 @@ class PPO:
         self.timer = time.time_ns() // 1_000_000
         self.jit_tracer = None
 
-        if kl_models_weights is not None:
-            for i in range(len(kl_models_weights)):
-                assert len(kl_models_weights[i]) in (2, 3)
-                if len(kl_models_weights[i]) == 2:
-                    kl_models_weights[i] = kl_models_weights[i] + (None,)
         self.kl_models_weights = kl_models_weights
 
     def update_reward_norm(self, rewards: np.ndarray) -> np.ndarray:
@@ -204,10 +199,9 @@ class PPO:
         # indices = self.agent.get_action_indices(dists)
 
         log_prob = self.agent.actor.log_prob(dist, actions)
-        entropy = self.agent.actor.entropy(dist, actions)
+        entropies = self.agent.actor.entropy(dist, actions)
 
-        entropy = -torch.mean(entropy)
-        return log_prob, entropy, dist
+        return log_prob, entropies, dist
 
     @staticmethod
     @numba.njit
@@ -243,7 +237,7 @@ class PPO:
         act_tensors = []
         # value_tensors = []
         log_prob_tensors = []
-        # advantage_tensors = []
+        advantage_tensors = []
         returns_tensors = []
 
         # rewards_tensors = []
@@ -263,12 +257,12 @@ class PPO:
 
             with th.no_grad():
                 if isinstance(obs_tensor, tuple):
-                    x = tuple(o.to(self.device) for o in obs_tensor)
+                    x = tuple(o.to(self.device, non_blocking=True) for o in obs_tensor)
                 else:
-                    x = obs_tensor.to(self.device)
+                    x = obs_tensor.to(self.device, non_blocking=True)
                 values = self.agent.critic(x).detach().cpu().numpy().flatten()  # No batching?
                 if self.kl_models_weights is not None:
-                    for k, (model, kl_coef, half_life) in enumerate(self.kl_models_weights):
+                    for k, (model, kl_schedule) in enumerate(self.kl_models_weights):
                         dist_other = model.get_action_distribution(x).logits.cpu()
                         dist_other_tensors.append(dist_other)
 
@@ -286,6 +280,7 @@ class PPO:
             obs_tensors.append(obs_tensor)
             act_tensors.append(th.from_numpy(actions))
             log_prob_tensors.append(th.from_numpy(log_probs))
+            advantage_tensors.append(th.from_numpy(advantages))
             returns_tensors.append(th.from_numpy(returns))
             # rewards_tensors.append(th.from_numpy(rewards))
 
@@ -308,7 +303,7 @@ class PPO:
             obs_tensor = th.cat(obs_tensors).float()
         act_tensor = th.cat(act_tensors)
         log_prob_tensor = th.cat(log_prob_tensors).float()
-        # advantages_tensor = th.cat(advantage_tensors)
+        advantages_tensor = th.cat(advantage_tensors).float()
         returns_tensor = th.cat(returns_tensors).float()
 
         dist_other_tensor = th.cat(dist_other_tensors).float()
@@ -337,6 +332,12 @@ class PPO:
 
         torch.cuda.empty_cache()
 
+        b_simple = [0, 0]
+        b_noise = [0, 0]
+        b_count = [0, 0]
+        small_gradients = [[], []]
+        # big_gradients = [None, None]
+
         samples_from_latest = 0
         precompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
         t0 = time.perf_counter_ns()
@@ -352,29 +353,31 @@ class PPO:
                     obs_batch = obs_tensor[indices]
                 act_batch = act_tensor[indices]
                 log_prob_batch = log_prob_tensor[indices]
-                # advantages_batch = advantages_tensor[indices]
+                advantages_batch = advantages_tensor[indices]
                 returns_batch = returns_tensor[indices]
                 if self.kl_models_weights is not None:
                     dist_other_batch = dist_other_tensor[indices]
+
+                advantages_batch = (advantages_batch - th.mean(advantages_batch)) / (th.std(advantages_batch) + 1e-8)
 
                 for i in range(0, self.batch_size, self.minibatch_size):
                     # Note: Will cut off final few samples
                     j = i + self.minibatch_size
 
                     if isinstance(obs_tensor, tuple):
-                        obs = tuple(o[i: j].to(self.device) for o in obs_batch)
+                        obs = tuple(o[i: j].to(self.device, non_blocking=True) for o in obs_batch)
                     else:
-                        obs = obs_batch[i: j].to(self.device)
+                        obs = obs_batch[i: j].to(self.device, non_blocking=True)
 
-                    act = act_batch[i: j].to(self.device)
-                    # adv = advantages_batch[i:i + self.minibatch_size].to(self.device)
-                    ret = returns_batch[i: j].to(self.device)
+                    act = act_batch[i: j].to(self.device, non_blocking=True)
+                    adv = advantages_batch[i: j].to(self.device, non_blocking=True)
+                    ret = returns_batch[i: j].to(self.device, non_blocking=True)
 
-                    old_log_prob = log_prob_batch[i: j].to(self.device)
+                    old_log_prob = log_prob_batch[i: j].to(self.device, non_blocking=True)
 
                     # TODO optimization: use forward_actor_critic instead of separate in case shared, also use GPU
                     try:
-                        log_prob, entropy, dist = self.evaluate_actions(obs, act)  # Assuming obs and actions as input
+                        log_prob, entropies, dist = self.evaluate_actions(obs, act)  # Assuming obs and actions as input
                     except ValueError as err:
                         print("ValueError in evaluate_actions", err)
                         continue
@@ -391,8 +394,8 @@ class PPO:
                     values_pred = self.agent.critic(obs)
 
                     values_pred = th.squeeze(values_pred)
-                    adv = ret - values_pred.detach()
-                    adv = (adv - th.mean(adv)) / (th.std(adv) + 1e-8)
+                    # adv = ret - values_pred.detach()
+                    # adv = (adv - th.mean(adv)) / (th.std(adv) + 1e-8)
 
                     clip_hi = 1 + self.clip_range
                     clip_lo = 1 / clip_hi
@@ -405,21 +408,20 @@ class PPO:
                     # **If we want value clipping, add it here**
                     value_loss = F.mse_loss(ret, values_pred)
 
-                    if entropy is None:
-                        # Approximate entropy when no analytical form
-                        entropy_loss = -th.mean(-log_prob)
-                    else:
-                        entropy_loss = entropy
+                    w = torch.erfc(adv / (2 ** 0.5))
+                    # w = 1.0
+
+                    entropy = torch.mean(entropies * w)
+                    entropy_loss = -entropy
 
                     kl_loss = 0
                     if self.kl_models_weights is not None:
-                        for k, (model, kl_coef, half_life) in enumerate(self.kl_models_weights):
-                            if half_life is not None:
-                                kl_coef *= 0.5 ** (self.total_steps / half_life)
+                        for k, (model, kl_schedule) in enumerate(self.kl_models_weights):
+                            kl_coef = kl_schedule(self.total_steps)
                             dist_other = th.distributions.Categorical(
-                                logits=dist_other_batch[i: j].to(self.device))
+                                logits=dist_other_batch[i: j].to(self.device, non_blocking=True))
                             divs = kl_divergence(dist_other, dist)
-                            div = divs.mean()
+                            div = torch.mean(divs * w)
                             tot_kl_other_models[k] += div
                             tot_kl_coeffs[k] = kl_coef
                             kl_loss += kl_coef * div
@@ -452,6 +454,11 @@ class PPO:
 
                     loss.backward()
 
+                    for i, mdl in enumerate((self.agent.actor, self.agent.critic)):
+                        small_gradients[i].append(torch.cat([p.grad.view(-1)
+                                                             for p in mdl.parameters()
+                                                             if p.grad is not None]).cpu())
+
                     # Unbiased low variance KL div estimator from http://joschu.net/blog/kl-approx.html
                     total_kl_div += th.mean((ratio - 1) - (log_prob - old_log_prob)).item()
                     tot_loss += loss.item()
@@ -461,6 +468,33 @@ class PPO:
                     tot_clipped += th.mean(((ratio < clip_lo) | (ratio > clip_hi)).float()).item()
                     n += 1
                     # pb.update(self.minibatch_size)
+
+                for i, mdl in enumerate((self.agent.actor, self.agent.critic)):
+                    small_gradients[i] = torch.stack(small_gradients[i])
+                    small_gradients[i] = torch.cat([small_gradients[i][0].reshape(1, -1),
+                                                    torch.diff(small_gradients[i], dim=0)])
+
+                    noise = torch.sum(torch.var(small_gradients[i], dim=0)) * self.minibatch_size
+                    scale = (small_gradients[i].mean(dim=0) ** 2).sum()
+
+                    accumulation_steps = self.batch_size / self.minibatch_size
+                    b_small = self.minibatch_size
+                    b_big = self.batch_size
+                    g_big = torch.sum(small_gradients[i], dim=0) / accumulation_steps
+
+                    g_b_small_2 = torch.sum(torch.sum(small_gradients[i] ** 2, dim=1)).item() / accumulation_steps
+                    g_b_big_2 = torch.sum(g_big ** 2).item()
+                    g2 = max((b_big * g_b_big_2 - b_small * g_b_small_2)
+                             / (b_big - b_small), 0)
+                    s = ((g_b_small_2 - g_b_big_2)
+                         / (1 / b_small - 1 / b_big))
+
+                    b_simple[i] += noise / scale
+                    b_noise[i] += s / (g2 or 1)
+                    b_count[i] += 1
+                    # if not 10_000 < b_simple[i] < 10_000_000:
+                    #     breakpoint()
+                small_gradients = [[], []]
 
                 # Clip grad norm
                 if self.max_grad_norm is not None:
@@ -474,6 +508,12 @@ class PPO:
         t1 = time.perf_counter_ns()
 
         assert n > 0
+
+        print(f"Actor B_simple={b_simple[0] / b_count[0]:.0f}")
+        print(f"Critic B_simple={b_simple[1] / b_count[1]:.0f}")
+        print(f"Actor B_noise={b_noise[0] / b_count[0]:.0f}")
+        print(f"Critic B_noise={b_noise[1] / b_count[1]:.0f}")
+
 
         postcompute = torch.cat([param.view(-1) for param in self.agent.actor.parameters()])
 

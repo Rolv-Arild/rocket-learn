@@ -203,7 +203,7 @@ def generate_episode(envs: List[Gym], policy_indices: List[Tuple["Policy", List[
                         dist_base = base_model.get_action_distribution(obs)  # TODO mass run base model
                         a0 = dist_base.probs
                         a1 = dist.probs.cpu()
-                        r = a1 * (torch.log(a1) - torch.log(a0))
+                        r = a0 * (torch.log(a1) - torch.log(a0))
                         dist = Categorical(logits=r)
 
                     action_indices = policy.sample_action(dist)
